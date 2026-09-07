@@ -96,6 +96,8 @@ jobs:
             grep -q '^protected_settings_transitions=2$' overlay-stress-summary.txt
             grep -q '^rotations=1$' overlay-stress-summary.txt
             grep -q '^finite_session=1$' overlay-stress-summary.txt
+            grep -q '^stateful_pause_control=1$' overlay-stress-summary.txt
+            grep -q '^auto_active_without_enable=1$' overlay-stress-summary.txt
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -163,8 +165,8 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           if [ "$release_kind" = debug ]; then
-            NOTES='Hosted build, Android 15 transaction test and 40-cycle delayed native overlay stress journey passed. New normal presentations use the owner window; an already-shown pending card persists until response. Test modes are 24h finite sessions. This APK uses a temporary build debug signature; permanent signing is still required for seamless upgrades. Physical USB acceptance and battery measurement are separate.'
+            NOTES='Hosted build, Android 15 transaction test and 40-cycle delayed native overlay stress journey passed. Delivery is active by default after setup; the only user stop state is explicit Pause, and the stateful Pause/Resume control is exercised in emulator acceptance. New normal presentations use the owner window; an already-shown pending card persists until response. This APK uses a temporary build debug signature.'
           else
-            NOTES='Hosted build, Android 15 transaction test and 40-cycle delayed native overlay stress journey passed. New normal presentations use the owner window; an already-shown pending card persists until response. Test modes are 24h finite sessions. APK uses the configured permanent signing identity. Physical USB acceptance and battery measurement are separate.'
+            NOTES='Hosted build, Android 15 transaction test and 40-cycle delayed native overlay stress journey passed. Delivery is active by default after setup; the only user stop state is explicit Pause, and the stateful Pause/Resume control is exercised in emulator acceptance. New normal presentations use the owner window; an already-shown pending card persists until response. APK uses the configured permanent signing identity.'
           fi
           gh release create "$release_tag" release/* --target "$GITHUB_SHA" --title "Повторение 0.1.$GITHUB_RUN_NUMBER ($release_kind)" --notes "$NOTES"
