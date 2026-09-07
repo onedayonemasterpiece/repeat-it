@@ -19,6 +19,7 @@ import java.time.*;
 
 public final class OverlayService extends Service {
     private Store store;private WindowManager wm;private View panel;private String visibleId="";
+    static volatile int rememberX,rememberY,repeatX,repeatY;
     private final Handler handler=new Handler(Looper.getMainLooper());
     private final Runnable boundary=this::tick;
     private final BroadcastReceiver changes=new BroadcastReceiver(){@Override public void onReceive(Context c,Intent i){tick();}};
@@ -43,7 +44,7 @@ public final class OverlayService extends Service {
     private boolean active(){return getSystemService(PowerManager.class).isInteractive();}
     private boolean locked(){return getSystemService(KeyguardManager.class).isDeviceLocked();}
     private void cancelContent(){String tag=store.value("notification_tag","");if(!tag.isEmpty())getSystemService(NotificationManager.class).cancel(tag,2);}
-    private void hide(){if(panel!=null){try{wm.removeView(panel);}catch(IllegalArgumentException ignored){}panel=null;visibleId="";}}
+    private void hide(){if(panel!=null){try{wm.removeView(panel);}catch(IllegalArgumentException ignored){}panel=null;visibleId="";}rememberX=rememberY=repeatX=repeatY=0;}
     private boolean previewAllowed(Store.Pending p){
         if(!p.card.preview)return false;
         for(Engine.Card c:store.cards())if(c.key().equals(p.card.key()))return c.preview&&c.active;
@@ -62,6 +63,14 @@ public final class OverlayService extends Service {
     }
     private int dp(int value){return Math.round(value*getResources().getDisplayMetrics().density);}
     private TextView text(String content,int sp,int color){TextView t=new TextView(this);t.setText(content);t.setTextSize(sp);t.setTextColor(color);t.setPadding(dp(8),dp(5),dp(8),dp(5));t.setTextIsSelectable(false);return t;}
+    private void publishControls(View root,Button remember,Button repeat){
+        root.post(()->{
+            if(panel!=root)return;
+            int[] a=new int[2],b=new int[2];remember.getLocationOnScreen(a);repeat.getLocationOnScreen(b);
+            rememberX=a[0]+remember.getWidth()/2;rememberY=a[1]+remember.getHeight()/2;
+            repeatX=b[0]+repeat.getWidth()/2;repeatY=b[1]+repeat.getHeight()/2;
+        });
+    }
     private void show(Store.Pending p){
         if(panel!=null&&visibleId.equals(p.id))return;
         if(!store.window().allowed(Instant.now())||locked()||!active()||!Settings.canDrawOverlays(this))return;
@@ -85,17 +94,16 @@ public final class OverlayService extends Service {
         }
         scroll.addView(body);root.addView(scroll,new LinearLayout.LayoutParams(-1,0,1));
         LinearLayout reactions=new LinearLayout(this);reactions.setOrientation(LinearLayout.HORIZONTAL);
-        for(String reaction:new String[]{"remember","repeat"}) {
-            Button button=new Button(this);button.setText(reaction.equals("remember")?"Помню":"Повторить");button.setTextSize(20);button.setMinHeight(dp(60));
-            button.setOnClickListener(v->{button.setEnabled(false);if(!locked()&&store.answer(p.id,reaction)){hide();cancelContent();tick();}else button.setEnabled(true);});
-            reactions.addView(button,new LinearLayout.LayoutParams(0,-2,1));
-        }
-        root.addView(reactions);
+        Button remember=new Button(this);remember.setText("Помню");remember.setTextSize(20);remember.setMinHeight(dp(60));remember.setContentDescription("repeat-it-remember");
+        remember.setOnClickListener(v->{remember.setEnabled(false);if(!locked()&&store.answer(p.id,"remember")){hide();cancelContent();tick();}else remember.setEnabled(true);});
+        Button repeat=new Button(this);repeat.setText("Повторить");repeat.setTextSize(20);repeat.setMinHeight(dp(60));repeat.setContentDescription("repeat-it-repeat");
+        repeat.setOnClickListener(v->{repeat.setEnabled(false);if(!locked()&&store.answer(p.id,"repeat")){hide();cancelContent();tick();}else repeat.setEnabled(true);});
+        reactions.addView(remember,new LinearLayout.LayoutParams(0,-2,1));reactions.addView(repeat,new LinearLayout.LayoutParams(0,-2,1));root.addView(reactions);
         int width,height;
         if(Build.VERSION.SDK_INT>=30){WindowMetrics metrics=wm.getMaximumWindowMetrics();Insets insets=metrics.getWindowInsets().getInsetsIgnoringVisibility(WindowInsets.Type.systemBars()|WindowInsets.Type.displayCutout());Rect bounds=metrics.getBounds();width=bounds.width()-insets.left-insets.right;height=bounds.height()-insets.top-insets.bottom;}
         else {android.util.DisplayMetrics metrics=new android.util.DisplayMetrics();wm.getDefaultDisplay().getMetrics(metrics);width=metrics.widthPixels;height=metrics.heightPixels;}
         WindowManager.LayoutParams params=new WindowManager.LayoutParams(Math.round(width*.94f),Math.round(height*.82f),WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE|WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL|WindowManager.LayoutParams.FLAG_SECURE,PixelFormat.TRANSLUCENT);params.gravity=Gravity.CENTER;
-        try{wm.addView(root,params);panel=root;visibleId=p.id;store.put("overlay_geometry",params.width+"x"+params.height+"/"+width+"x"+height);}catch(RuntimeException e){store.put("delivery_error","overlay_failed:"+e.getClass().getSimpleName());}
+        try{wm.addView(root,params);panel=root;visibleId=p.id;store.put("overlay_geometry",params.width+"x"+params.height+"/"+width+"x"+height);publishControls(root,remember,repeat);}catch(RuntimeException e){store.put("delivery_error","overlay_failed:"+e.getClass().getSimpleName());}
     }
     private void tick(){
         handler.removeCallbacks(boundary);
