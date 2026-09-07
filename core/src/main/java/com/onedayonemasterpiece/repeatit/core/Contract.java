@@ -52,7 +52,7 @@ public final class Contract {
             if(!root.containsKey("revision")||!root.containsKey("title")||!root.containsKey("language"))
                 throw new IllegalArgumentException("invalid_deck_metadata");
         }
-        if(!(list instanceof List)||((List<?>)list).size()>MAX_CARDS)throw new IllegalArgumentException("invalid_cards");
+        if(!(list instanceof List)||((List<?>)list).isEmpty()||((List<?>)list).size()>MAX_CARDS)throw new IllegalArgumentException("invalid_cards");
         Map<String,List<Engine.Card>> groups=new LinkedHashMap<>();
         int i=0;
         for(Object raw:(List<?>)list) {
