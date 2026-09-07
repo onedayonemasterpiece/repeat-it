@@ -66,37 +66,27 @@ jobs:
           emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim -camera-back none -timezone Etc/UTC
           disable-animations: true
           script: |
-            set -eu
-            PKG=com.onedayonemasterpiece.repeatit
-            TEST_PKG=com.onedayonemasterpiece.repeatit.test
-            RUNNER="$TEST_PKG/androidx.test.runner.AndroidJUnitRunner"
             adb install apks/debug/app-debug.apk
             adb install apks/androidTest/debug/app-debug-androidTest.apk
-
-            grant_runtime_permissions() {
-              adb shell pm grant "$PKG" android.permission.POST_NOTIFICATIONS || true
-              adb shell appops set "$PKG" SYSTEM_ALERT_WINDOW allow || adb shell appops set "$PKG" android:system_alert_window allow
-              adb shell appops get "$PKG" SYSTEM_ALERT_WINDOW
-            }
-
-            # Keep the small transaction/readback-isolation regression as a separate fresh-install test.
-            grant_runtime_permissions
-            adb shell am instrument -w -e class com.onedayonemasterpiece.repeatit.StorageCycleTest "$RUNNER" | tee storage-cycle.txt
+            adb shell pm grant com.onedayonemasterpiece.repeatit android.permission.POST_NOTIFICATIONS || true
+            adb shell appops set com.onedayonemasterpiece.repeatit SYSTEM_ALERT_WINDOW allow
+            adb shell appops get com.onedayonemasterpiece.repeatit SYSTEM_ALERT_WINDOW
+            adb shell am instrument -w -e class com.onedayonemasterpiece.repeatit.StorageCycleTest com.onedayonemasterpiece.repeatit.test/androidx.test.runner.AndroidJUnitRunner | tee storage-cycle.txt
             grep -q 'OK (1 test)' storage-cycle.txt
-
-            # Reset app state, then exercise the real overlay against Android system windows.
-            adb shell am force-stop "$PKG" || true
-            adb shell pm clear "$PKG"
-            grant_runtime_permissions
-            adb shell am instrument -w -e class com.onedayonemasterpiece.repeatit.OverlayStressTest "$RUNNER" | tee overlay-stress.txt
+            adb shell am force-stop com.onedayonemasterpiece.repeatit || true
+            adb shell pm clear com.onedayonemasterpiece.repeatit
+            adb shell pm grant com.onedayonemasterpiece.repeatit android.permission.POST_NOTIFICATIONS || true
+            adb shell appops set com.onedayonemasterpiece.repeatit SYSTEM_ALERT_WINDOW allow
+            adb shell appops get com.onedayonemasterpiece.repeatit SYSTEM_ALERT_WINDOW
+            adb shell am instrument -w -e class com.onedayonemasterpiece.repeatit.OverlayStressTest com.onedayonemasterpiece.repeatit.test/androidx.test.runner.AndroidJUnitRunner | tee overlay-stress.txt
             grep -q 'OK (1 test)' overlay-stress.txt
-            adb pull "/sdcard/Android/data/$PKG/files/overlay-stress-summary.txt" overlay-stress-summary.txt
+            adb pull /sdcard/Android/data/com.onedayonemasterpiece.repeatit/files/overlay-stress-summary.txt overlay-stress-summary.txt
             grep -q '^result=PASS$' overlay-stress-summary.txt
             grep -q '^cycles=40$' overlay-stress-summary.txt
             grep -q '^events=40$' overlay-stress-summary.txt
-            adb shell appops get "$PKG" > appops.txt
+            adb shell appops get com.onedayonemasterpiece.repeatit > appops.txt
             adb shell dumpsys window windows > window-evidence.txt
-            adb shell dumpsys activity services "$PKG" > service-evidence.txt
+            adb shell dumpsys activity services com.onedayonemasterpiece.repeatit > service-evidence.txt
       - uses: actions/upload-artifact@v4
         if: always()
         with:
