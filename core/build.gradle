@@ -1,0 +1,9 @@
+plugins { id 'java-library' }
+java { toolchain { languageVersion = JavaLanguageVersion.of(17) } }
+tasks.register('coreChecks', JavaExec) {
+    dependsOn testClasses
+    classpath = sourceSets.test.runtimeClasspath
+    mainClass = 'com.onedayonemasterpiece.repeatit.core.CoreChecks'
+    enableAssertions = true
+}
+check.dependsOn coreChecks
