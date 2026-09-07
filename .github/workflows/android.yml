@@ -63,10 +63,10 @@ jobs:
           target: google_apis
           arch: x86_64
           profile: pixel_7
-          emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim -camera-back none -timezone UTC
+          emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim -camera-back none -timezone Etc/UTC
           disable-animations: true
           script: |
-            set -euo pipefail
+            set -eu
             PKG=com.onedayonemasterpiece.repeatit
             TEST_PKG=com.onedayonemasterpiece.repeatit.test
             RUNNER="$TEST_PKG/androidx.test.runner.AndroidJUnitRunner"
