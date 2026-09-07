@@ -16,18 +16,14 @@ import org.junit.Test;
 import org.junit.runner.RunWith;
 import static org.junit.Assert.*;
 
-/**
- * Synthetic native stress journey for the real TYPE_APPLICATION_OVERLAY.
- * It never uses owner data, PATs or normal-mode progress.
- */
+/** Synthetic stress journey for the real TYPE_APPLICATION_OVERLAY. Owner data/PAT/normal progress are never used. */
 @RunWith(AndroidJUnit4.class)
 public final class OverlayStressTest {
     private static final int CYCLES=40;
     private static final long UI_TIMEOUT=7000;
+    private static final String PKG="com.onedayonemasterpiece.repeatit";
 
-    private static void changed(Context c){
-        c.sendBroadcast(new Intent(Delivery.CHANGED).setPackage(c.getPackageName()));
-    }
+    private static void changed(Context c){c.sendBroadcast(new Intent(Delivery.CHANGED).setPackage(c.getPackageName()));}
 
     private static void waitActivityHidden() throws Exception {
         long end=System.currentTimeMillis()+UI_TIMEOUT;
@@ -53,6 +49,22 @@ public final class OverlayStressTest {
         fail("Overlay reaction hit targets were not laid out");
     }
 
+    private static boolean windowVisible(UiDevice device) throws Exception {
+        String dump=device.executeShellCommand("dumpsys window windows");
+        int owner=dump.indexOf("package="+PKG+" appop=SYSTEM_ALERT_WINDOW");
+        if(owner<0)return false;
+        int start=dump.lastIndexOf("Window #",owner),end=dump.indexOf("Window #",owner+1);
+        if(start<0)start=Math.max(0,owner-1000);if(end<0)end=Math.min(dump.length(),owner+5000);
+        String block=dump.substring(start,end);
+        return block.contains("mPolicyVisibility=true")&&block.contains("Surface: shown=true")&&block.contains("isVisible=true");
+    }
+
+    private static void waitWindow(UiDevice device,boolean visible) throws Exception {
+        long end=System.currentTimeMillis()+UI_TIMEOUT;
+        while(System.currentTimeMillis()<end){if(windowVisible(device)==visible)return;Thread.sleep(100);}
+        assertEquals("Unexpected OS policy visibility for overlay",visible,windowVisible(device));
+    }
+
     private static void tapReaction(UiDevice device,boolean repeat){
         int x=repeat?OverlayService.repeatX:OverlayService.rememberX;
         int y=repeat?OverlayService.repeatY:OverlayService.rememberY;
@@ -65,16 +77,11 @@ public final class OverlayStressTest {
         File root=c.getExternalFilesDir(null);
         try(FileWriter out=new FileWriter(new File(root,"overlay-stress-debug.txt"),true)){
             Store.Pending p=store.pending();
-            out.write("stage="+stage+"\n");
-            out.write("main_visible="+MainActivity.visible+"\n");
-            out.write("foreground_package="+String.valueOf(device.getCurrentPackageName())+"\n");
-            out.write("can_draw_overlays="+Settings.canDrawOverlays(c)+"\n");
-            out.write("enabled="+store.value("enabled","")+"\npaused="+store.value("paused","")+"\nmode="+store.mode()+"\n");
-            out.write("pending_id="+(p==null?"":p.id)+"\npending_shown="+(p==null?0:p.shown)+"\n");
-            out.write("next_due="+String.valueOf(store.decision().due)+"\n");
-            out.write("overlay_geometry="+store.value("overlay_geometry","")+"\n");
-            out.write("remember_center="+OverlayService.rememberX+","+OverlayService.rememberY+"\n");
-            out.write("repeat_center="+OverlayService.repeatX+","+OverlayService.repeatY+"\n");
+            out.write("stage="+stage+"\nmain_visible="+MainActivity.visible+"\nforeground_package="+String.valueOf(device.getCurrentPackageName())+"\n");
+            out.write("can_draw_overlays="+Settings.canDrawOverlays(c)+"\nenabled="+store.value("enabled","")+"\npaused="+store.value("paused","")+"\nmode="+store.mode()+"\n");
+            out.write("pending_id="+(p==null?"":p.id)+"\npending_shown="+(p==null?0:p.shown)+"\nnext_due="+String.valueOf(store.decision().due)+"\n");
+            out.write("overlay_geometry="+store.value("overlay_geometry","")+"\nremember_center="+OverlayService.rememberX+","+OverlayService.rememberY+"\nrepeat_center="+OverlayService.repeatX+","+OverlayService.repeatY+"\n");
+            try{out.write("wm_visible="+windowVisible(device)+"\n");}catch(Exception e){out.write("wm_visible=unknown\n");}
             out.write("delivery_error="+store.value("delivery_error","")+"\nsync_error="+store.value("sync_error","")+"\n---\n");
         }catch(Exception ignored){}
         try{device.dumpWindowHierarchy(new File(root,"overlay-window-hierarchy.xml"));}catch(Exception ignored){}
@@ -82,18 +89,14 @@ public final class OverlayStressTest {
 
     private static void waitEvents(Store store,int expected) throws Exception {
         long end=System.currentTimeMillis()+UI_TIMEOUT;
-        while(System.currentTimeMillis()<end){
-            if(store.eventCount(false)==expected)return;
-            Thread.sleep(60);
-        }
+        while(System.currentTimeMillis()<end){if(store.eventCount(false)==expected)return;Thread.sleep(60);}
         assertEquals("Response event did not commit",expected,store.eventCount(false));
     }
 
     private static void assertGeometry(Store store){
         String value=store.value("overlay_geometry","");
         assertTrue("Overlay geometry missing",value.matches("[0-9]+x[0-9]+/[0-9]+x[0-9]+"));
-        String[] halves=value.split("/");
-        String[] panel=halves[0].split("x"),screen=halves[1].split("x");
+        String[] halves=value.split("/"),panel=halves[0].split("x"),screen=halves[1].split("x");
         double wr=Double.parseDouble(panel[0])/Double.parseDouble(screen[0]);
         double hr=Double.parseDouble(panel[1])/Double.parseDouble(screen[1]);
         assertTrue("Overlay width should be near 94%",wr>=0.90&&wr<=0.98);
@@ -107,76 +110,60 @@ public final class OverlayStressTest {
         assertTrue("SYSTEM_ALERT_WINDOW must be granted by harness",Settings.canDrawOverlays(c));
         assertEquals("Fresh stress install expected",0,store.cards().size());
 
-        // Test-only broad window avoids wall-clock CI flakiness. Production stays 07:40–23:00
-        // and its exact boundaries are separately covered by the pure scheduler suite.
+        // Disposable emulator only. Production boundaries remain 07:40–23:00 and are tested in core.
         store.put("window_start","00:00");store.put("window_end","23:59");
         store.put("enabled","true");store.put("paused","false");store.put("sound","false");
         List<Engine.Card> cards=new ArrayList<>();
-        for(int i=0;i<12;i++){
-            Engine.Card card=new Engine.Card();card.deck="stress";card.id="card-"+i;
-            card.title="Stress card "+i;card.text="Synthetic overlay stress payload "+i;cards.add(card);
-        }
+        for(int i=0;i<12;i++){Engine.Card card=new Engine.Card();card.deck="stress";card.id="card-"+i;card.title="Stress card "+i;card.text="Synthetic overlay stress payload "+i;cards.add(card);}
         assertTrue(store.importCards(Map.of("learning/decks/stress.yaml",cards)).isEmpty());
         store.setMode("agent_debug");store.recompute();
 
-        // Start the FGS while our Activity is unquestionably foreground. Then wait for its real
-        // onPause before asking the service to put an overlay above Android Settings.
+        // Start FGS while Repeat It is foreground; stress delivery itself over the ordinary Launcher.
         Intent launch=new Intent(c,MainActivity.class).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
         c.startActivity(launch);Thread.sleep(700);Delivery.start(c);Thread.sleep(300);
-        device.pressHome();device.executeShellCommand("am start -a android.settings.SETTINGS");
-        waitActivityHidden();Thread.sleep(300);writeDebug(c,device,store,"ready_under_settings");
+        device.pressHome();waitActivityHidden();Thread.sleep(300);writeDebug(c,device,store,"ready_on_launcher");
 
-        int screenCycles=0,appSwitches=1,rotations=0;
+        int screenCycles=0,protectedTransitions=0,rotations=0;
         try {
             for(int i=0;i<CYCLES;i++){
-                store.forceDue();changed(c);waitPresentation(store);waitControls();
+                store.forceDue();changed(c);waitPresentation(store);waitControls();waitWindow(device,true);
                 writeDebug(c,device,store,"cycle_"+i+"_presented");
                 Store.Pending presented=store.pending();
                 assertNotNull("Due card must become pending",presented);
                 assertTrue("Pending was not actually presented; delivery_error="+store.value("delivery_error",""),presented.shown>0);
-                assertGeometry(store);
-                assertTrue("Reaction centers must be distinct",OverlayService.rememberX!=OverlayService.repeatX);
+                assertGeometry(store);assertTrue("Reaction centers must be distinct",OverlayService.rememberX!=OverlayService.repeatX);
 
+                if(i==8||i==27){
+                    String pendingId=presented.id;int before=store.eventCount(false);
+                    device.executeShellCommand("am start -a android.settings.SETTINGS");Thread.sleep(500);waitActivityHidden();
+                    waitWindow(device,false);assertEquals("Protected Settings window must not consume pending",pendingId,store.pending().id);assertEquals(before,store.eventCount(false));
+                    device.pressHome();Thread.sleep(350);changed(c);waitWindow(device,true);waitControls();assertEquals(pendingId,store.pending().id);protectedTransitions++;
+                }
                 if(i==10||i==29){
-                    String pendingId=presented.id;
-                    device.sleep();Thread.sleep(450);
-                    assertEquals("Pending must survive screen-off",pendingId,store.pending().id);
-                    device.wakeUp();device.executeShellCommand("wm dismiss-keyguard");Thread.sleep(450);changed(c);
-                    assertEquals("Pending must survive screen-on",pendingId,store.pending().id);
-                    waitControls();screenCycles++;
+                    String pendingId=presented.id;device.sleep();Thread.sleep(450);assertEquals("Pending must survive screen-off",pendingId,store.pending().id);
+                    device.wakeUp();device.executeShellCommand("wm dismiss-keyguard");Thread.sleep(450);device.pressHome();changed(c);
+                    assertEquals("Pending must survive screen-on",pendingId,store.pending().id);waitWindow(device,true);waitControls();screenCycles++;
                 }
                 if(i==20){
-                    device.setOrientationLeft();Thread.sleep(650);changed(c);waitControls();assertGeometry(store);
-                    device.setOrientationNatural();Thread.sleep(650);changed(c);waitControls();assertGeometry(store);
+                    device.setOrientationLeft();Thread.sleep(650);changed(c);waitControls();waitWindow(device,true);assertGeometry(store);
+                    device.setOrientationNatural();Thread.sleep(650);changed(c);waitControls();waitWindow(device,true);assertGeometry(store);
                     device.unfreezeRotation();rotations++;
                 }
-                if(i>0&&i%5==0){
-                    device.executeShellCommand(i%10==0?"am start -a android.settings.WIFI_SETTINGS":"am start -a android.settings.SETTINGS");
-                    Thread.sleep(450);waitActivityHidden();changed(c);waitControls();appSwitches++;
-                }
 
-                tapReaction(device,i%3==0);
-                waitEvents(store,i+1);
+                tapReaction(device,i%3==0);waitEvents(store,i+1);
                 assertNull("Answered pending must close",store.pending());
                 assertEquals("Stress must not write verified normal progress",0,store.eventCount(true));
             }
 
-            assertEquals(CYCLES,store.eventCount(false));
-            assertEquals("agent_debug",store.mode());
+            assertEquals(CYCLES,store.eventCount(false));assertEquals("agent_debug",store.mode());
             assertTrue("Overlay delivery error: "+store.value("delivery_error",""),store.value("delivery_error","").isEmpty());
-            List<Store.Batch> batches=store.batches();
-            assertEquals("40 synthetic events should fit one outbox batch",1,batches.size());
-            assertEquals("agent_debug",batches.get(0).mode);
-
+            List<Store.Batch> batches=store.batches();assertEquals("40 synthetic events should fit one outbox batch",1,batches.size());assertEquals("agent_debug",batches.get(0).mode);
             File evidence=new File(c.getExternalFilesDir(null),"overlay-stress-summary.txt");
             try(FileWriter out=new FileWriter(evidence,false)){
                 out.write("result=PASS\ncycles="+CYCLES+"\nevents="+store.eventCount(false)+"\nmode="+store.mode()+"\n");
-                out.write("screen_off_on="+screenCycles+"\napp_switches="+appSwitches+"\nrotations="+rotations+"\n");
+                out.write("screen_off_on="+screenCycles+"\nprotected_settings_transitions="+protectedTransitions+"\nrotations="+rotations+"\n");
                 out.write("geometry="+store.value("overlay_geometry","")+"\nalarm_precision="+store.value("alarm_precision","")+"\n");
             }
-        } finally {
-            writeDebug(c,device,store,"finally");
-            store.put("enabled","false");changed(c);Thread.sleep(250);
-        }
+        } finally {writeDebug(c,device,store,"finally");store.put("enabled","false");changed(c);Thread.sleep(250);}
     }
 }
