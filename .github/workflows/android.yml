@@ -79,14 +79,18 @@ jobs:
             adb shell appops set com.onedayonemasterpiece.repeatit SYSTEM_ALERT_WINDOW allow
             adb shell appops get com.onedayonemasterpiece.repeatit SYSTEM_ALERT_WINDOW
             adb shell am instrument -w -e class com.onedayonemasterpiece.repeatit.OverlayStressTest com.onedayonemasterpiece.repeatit.test/androidx.test.runner.AndroidJUnitRunner | tee overlay-stress.txt
+            adb pull /sdcard/Android/data/com.onedayonemasterpiece.repeatit/files/overlay-stress-debug.txt overlay-stress-debug.txt || true
+            adb pull /sdcard/Android/data/com.onedayonemasterpiece.repeatit/files/overlay-window-hierarchy.xml overlay-window-hierarchy.xml || true
+            adb shell appops get com.onedayonemasterpiece.repeatit > appops.txt
+            adb shell dumpsys window windows > window-evidence.txt
+            adb shell dumpsys activity services com.onedayonemasterpiece.repeatit > service-evidence.txt
+            adb shell dumpsys activity activities > activity-evidence.txt
+            adb shell pidof com.onedayonemasterpiece.repeatit > pid-evidence.txt || true
             grep -q 'OK (1 test)' overlay-stress.txt
             adb pull /sdcard/Android/data/com.onedayonemasterpiece.repeatit/files/overlay-stress-summary.txt overlay-stress-summary.txt
             grep -q '^result=PASS$' overlay-stress-summary.txt
             grep -q '^cycles=40$' overlay-stress-summary.txt
             grep -q '^events=40$' overlay-stress-summary.txt
-            adb shell appops get com.onedayonemasterpiece.repeatit > appops.txt
-            adb shell dumpsys window windows > window-evidence.txt
-            adb shell dumpsys activity services com.onedayonemasterpiece.repeatit > service-evidence.txt
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -94,10 +98,14 @@ jobs:
           path: |
             storage-cycle.txt
             overlay-stress.txt
+            overlay-stress-debug.txt
+            overlay-window-hierarchy.xml
             overlay-stress-summary.txt
             appops.txt
             window-evidence.txt
             service-evidence.txt
+            activity-evidence.txt
+            pid-evidence.txt
   release:
     if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
     needs: [checks, emulator]
