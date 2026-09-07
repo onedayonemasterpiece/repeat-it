@@ -12,6 +12,7 @@ import android.os.*;
 import android.provider.Settings;
 import android.view.*;
 import android.widget.*;
+import androidx.core.content.ContextCompat;
 import com.onedayonemasterpiece.repeatit.core.Engine;
 import java.io.File;
 import java.time.*;
@@ -35,7 +36,7 @@ public final class OverlayService extends Service {
         Notification notification=new Notification.Builder(this,SERVICE).setSmallIcon(R.drawable.ic_repeat).setContentTitle("Повторение включено").setContentText("Карточки только 07:40–23:00. Открыть состояние / паузу").setOngoing(true).setContentIntent(open()).build();
         if(Build.VERSION.SDK_INT>=34)startForeground(1,notification,ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE);else startForeground(1,notification);
         IntentFilter filter=new IntentFilter();filter.addAction(Intent.ACTION_SCREEN_ON);filter.addAction(Intent.ACTION_SCREEN_OFF);filter.addAction(Intent.ACTION_USER_PRESENT);filter.addAction(Intent.ACTION_TIME_CHANGED);filter.addAction(Intent.ACTION_TIMEZONE_CHANGED);filter.addAction(Delivery.CHANGED);
-        if(Build.VERSION.SDK_INT>=33)registerReceiver(changes,filter,Context.RECEIVER_NOT_EXPORTED);else registerReceiver(changes,filter);
+        ContextCompat.registerReceiver(this,changes,filter,ContextCompat.RECEIVER_NOT_EXPORTED);
     }
     @Override public int onStartCommand(Intent intent,int flags,int startId){tick();return START_STICKY;}
     @Override public IBinder onBind(Intent i){return null;}
