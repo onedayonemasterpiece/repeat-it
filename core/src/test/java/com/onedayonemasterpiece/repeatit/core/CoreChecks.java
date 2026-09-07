@@ -34,13 +34,16 @@ public final class CoreChecks {
         Engine.Plan p=plan(2);Engine.State s=new Engine.State();
         Engine.State remember=Engine.answer(s,p,"remember",NOW,NOW.plusSeconds(10),W);
         Engine.State repeat=Engine.answer(s,p,"repeat",NOW,NOW.plusSeconds(10),W);
-        check(repeat.eligible.isBefore(remember.eligible),"repeat returns earlier");
+        check(repeat.eligible.isBefore(remember.eligible),"repeat eligibility is earlier");
         check(remember.contacts==1 && remember.weakDebt==0,"remember advances successful mastery count");
         check(repeat.contacts==0 && repeat.weakDebt==1,"repeat never advances mastery count");
         Engine.State rapid=Engine.answer(remember,p,"remember",NOW.plusSeconds(11),NOW.plusSeconds(12),W);
         check(rapid.contacts==1,"rapid taps cannot credit spacing");
         Engine.Decision afterRepeat=Engine.next(cards(1),List.of(p),Map.of(card(0).learningKey(),repeat),NOW.plusSeconds(11),W,List.of());
+        Engine.Decision afterRemember=Engine.next(cards(1),List.of(p),Map.of(card(0).learningKey(),remember),NOW.plusSeconds(11),W,List.of());
         check(afterRepeat.remaining==5,"repeat does not reduce required successful remembers");
+        check(afterRemember.remaining==4,"remember reduces required successful remembers by one");
+        check(afterRepeat.due.isBefore(afterRemember.due),"repeat actually resurfaces deadline card earlier");
 
         Engine.Card near=card(0),far=card(1);far.deck="far";Engine.Plan farP=plan(365);farP.deck="far";
         Engine.Decision mixed=Engine.next(List.of(near,far),List.of(p,farP),Map.of(),NOW,W,List.of());
