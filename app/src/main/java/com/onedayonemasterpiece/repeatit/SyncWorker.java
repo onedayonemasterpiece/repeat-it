@@ -12,7 +12,12 @@ public final class SyncWorker extends Worker {
     public static void configure(Context c,boolean manual){
         WorkManager wm=WorkManager.getInstance(c);Constraints network=new Constraints.Builder().setRequiredNetworkType(NetworkType.CONNECTED).build();
         wm.enqueueUniquePeriodicWork("github-periodic",ExistingPeriodicWorkPolicy.KEEP,new PeriodicWorkRequest.Builder(SyncWorker.class,4,TimeUnit.HOURS).setConstraints(network).setBackoffCriteria(BackoffPolicy.EXPONENTIAL,30,TimeUnit.SECONDS).build());
-        if(manual){Store.get(c).put("sync_requested_at",Instant.now().toString());wm.enqueueUniqueWork("github-manual",ExistingWorkPolicy.KEEP,new OneTimeWorkRequest.Builder(SyncWorker.class).setConstraints(network).setBackoffCriteria(BackoffPolicy.EXPONENTIAL,30,TimeUnit.SECONDS).build());}
+        if(manual){
+            Store.get(c).put("sync_requested_at",Instant.now().toString());
+            OneTimeWorkRequest request=new OneTimeWorkRequest.Builder(SyncWorker.class).setConstraints(network).setBackoffCriteria(BackoffPolicy.EXPONENTIAL,30,TimeUnit.SECONDS).build();
+            // A refresh requested while another is running must still get a later snapshot, not disappear behind KEEP.
+            wm.enqueueUniqueWork("github-manual",ExistingWorkPolicy.APPEND_OR_REPLACE,request);
+        }
     }
     private void changed(){getApplicationContext().sendBroadcast(new android.content.Intent(Delivery.CHANGED).setPackage(getApplicationContext().getPackageName()));}
     @NonNull @Override public Result doWork(){
