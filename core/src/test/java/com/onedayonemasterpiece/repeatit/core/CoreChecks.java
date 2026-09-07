@@ -48,6 +48,7 @@ public final class CoreChecks {
         check(decision(10,2).feasibility.startsWith("preliminary"),"no invented human capacity");
         check(Engine.next(cards(100),List.of(p),Map.of(),NOW,W,List.of(99999999L,99999999L,99999999L,99999999L,99999999L)).feasibility.startsWith("risk_from"),"empirical risk labelled separately");
         Map<String,Object> doc=document();check(Contract.deck(doc).cards.size()==1,"canonical deck imports");
+        Map<String,Object> empty=document();empty.put("cards",List.of());rejects(()->Contract.deck(empty),"empty logical deck rejected");
         ((Map<String,Object>)((List<?>)doc.get("cards")).get(0)).put("revision","2");check(Contract.deck(doc).cards.get(0).revision==2,"numeric-string safe recovery");
         ((Map<String,Object>)((List<?>)doc.get("cards")).get(0)).put("lockscreen_preview","true");check(!Contract.deck(doc).cards.get(0).preview,"string true never privacy consent");
         ((Map<String,Object>)((List<?>)doc.get("cards")).get(0)).put("image",Map.of("path","https://evil.invalid/file"));check(Contract.deck(doc).cards.get(0).image.isEmpty(),"bad image preserves text");
