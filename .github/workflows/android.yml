@@ -57,7 +57,7 @@ jobs:
           sudo chmod 0666 /dev/kvm
           test -r /dev/kvm && test -w /dev/kvm
       - name: Pixel 7 Android 15 native lifecycle and overlay stress
-        uses: reactivecircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d # v2.34.0; reused from events-bot-new OTP harness
+        uses: reactivecircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d
         with:
           api-level: 35
           target: google_apis
@@ -91,6 +91,11 @@ jobs:
             grep -q '^result=PASS$' overlay-stress-summary.txt
             grep -q '^cycles=40$' overlay-stress-summary.txt
             grep -q '^events=40$' overlay-stress-summary.txt
+            grep -q '^delayed_pending_checks=3$' overlay-stress-summary.txt
+            grep -q '^screen_off_on=2$' overlay-stress-summary.txt
+            grep -q '^protected_settings_transitions=2$' overlay-stress-summary.txt
+            grep -q '^rotations=1$' overlay-stress-summary.txt
+            grep -q '^finite_session=1$' overlay-stress-summary.txt
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -158,8 +163,8 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           if [ "$release_kind" = debug ]; then
-            NOTES='Hosted build, Android 15 transaction test and 40-cycle native overlay stress journey passed. This APK uses the build debug signature for first-device acceptance; a later permanent-signing migration may require reinstall. Physical USB acceptance and battery measurement are not asserted by CI.'
+            NOTES='Hosted build, Android 15 transaction test and 40-cycle delayed native overlay stress journey passed. New normal presentations use the owner window; an already-shown pending card persists until response. Test modes are 24h finite sessions. This APK uses a temporary build debug signature; permanent signing is still required for seamless upgrades. Physical USB acceptance and battery measurement are separate.'
           else
-            NOTES='Hosted build, Android 15 transaction test and 40-cycle native overlay stress journey passed. APK uses the configured permanent signing identity. Physical USB acceptance and battery measurement are separate.'
+            NOTES='Hosted build, Android 15 transaction test and 40-cycle delayed native overlay stress journey passed. New normal presentations use the owner window; an already-shown pending card persists until response. Test modes are 24h finite sessions. APK uses the configured permanent signing identity. Physical USB acceptance and battery measurement are separate.'
           fi
           gh release create "$release_tag" release/* --target "$GITHUB_SHA" --title "Повторение 0.1.$GITHUB_RUN_NUMBER ($release_kind)" --notes "$NOTES"

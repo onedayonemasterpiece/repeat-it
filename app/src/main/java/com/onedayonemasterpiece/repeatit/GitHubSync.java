@@ -12,118 +12,44 @@ import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.util.*;
 
-/** GitHub Contents transport. Never follows a redirect or reads outside learning/. */
+/** GitHub Contents transport. Knowledge is read from one immutable idea-hub commit; writes are own progress only. */
 public final class GitHubSync {
     private static final String ROOT="https://api.github.com/repos/onedayonemasterpiece/idea-hub/contents/";
-    private final Store store;private final Context context;private final String token;
-    private final List<String> issues=new ArrayList<>();
+    private static final String HEAD="https://api.github.com/repos/onedayonemasterpiece/idea-hub/commits/main";
+    private final Store store;private final Context context;private final String token;private final List<String> issues=new ArrayList<>();private String sourceRef="main";
     public GitHubSync(Context c,String token){context=c;store=Store.get(c);this.token=token;}
     public static final class RemoteError extends IOException {public final int status;RemoteError(int status){super("github_http_"+status);this.status=status;}}
     private static final class Response {String body,etag;byte[] bytes;int status;}
     public static String hash(byte[] bytes){try{byte[] h=MessageDigest.getInstance("SHA-256").digest(bytes);StringBuilder b=new StringBuilder();for(byte v:h)b.append(String.format(java.util.Locale.ROOT,"%02x",v&255));return b.toString();}catch(Exception e){throw new IllegalStateException(e);}}
+    private String readRef(String path){return path.startsWith("learning/progress/")?"main":sourceRef;}
     private Response request(String path,String method,boolean raw,String etag,String body,int limit) throws IOException {
-        Contract.readPath(path);if(!method.equals("GET"))Contract.writePath(store.device(),path);
-        URL url=new URL(ROOT+path+(method.equals("GET")?"?ref=main":""));
-        HttpsURLConnection conn=(HttpsURLConnection)url.openConnection();conn.setInstanceFollowRedirects(false);conn.setConnectTimeout(15000);conn.setReadTimeout(20000);conn.setRequestMethod(method);
-        conn.setRequestProperty("Authorization","Bearer "+token);conn.setRequestProperty("Accept",raw?"application/vnd.github.raw+json":"application/vnd.github+json");conn.setRequestProperty("X-GitHub-Api-Version","2022-11-28");conn.setRequestProperty("User-Agent","Repeat-It/1");
-        if(etag!=null&&!etag.isEmpty())conn.setRequestProperty("If-None-Match",etag);
-        if(body!=null){conn.setDoOutput(true);conn.setRequestProperty("Content-Type","application/json; charset=utf-8");try(OutputStream out=conn.getOutputStream()){out.write(body.getBytes(StandardCharsets.UTF_8));}}
-        try {
-            Response result=new Response();result.status=conn.getResponseCode();result.etag=conn.getHeaderField("ETag");
-            if(result.status==304){result.bytes=new byte[0];result.body="";return result;}
-            if(result.status<200||result.status>=300)throw new RemoteError(result.status);
-            try(InputStream in=conn.getInputStream();ByteArrayOutputStream out=new ByteArrayOutputStream()){
-                byte[] buf=new byte[8192];int n,total=0;while((n=in.read(buf))!=-1){total+=n;if(total>limit)throw new IOException("document_size_limit");out.write(buf,0,n);}result.bytes=out.toByteArray();
-            }
-            result.body=new String(result.bytes,StandardCharsets.UTF_8);return result;
-        }finally{conn.disconnect();}
+        Contract.readPath(path);if(!method.equals("GET"))Contract.writePath(store.device(),path);String suffix="";if(method.equals("GET"))suffix="?ref="+URLEncoder.encode(readRef(path),"UTF-8");
+        URL url=new URL(ROOT+path+suffix);HttpsURLConnection conn=(HttpsURLConnection)url.openConnection();conn.setInstanceFollowRedirects(false);conn.setConnectTimeout(15000);conn.setReadTimeout(20000);conn.setRequestMethod(method);conn.setRequestProperty("Authorization","Bearer "+token);conn.setRequestProperty("Accept",raw?"application/vnd.github.raw+json":"application/vnd.github+json");conn.setRequestProperty("X-GitHub-Api-Version","2022-11-28");conn.setRequestProperty("User-Agent","Repeat-It/1");
+        if(etag!=null&&!etag.isEmpty())conn.setRequestProperty("If-None-Match",etag);if(body!=null){conn.setDoOutput(true);conn.setRequestProperty("Content-Type","application/json; charset=utf-8");try(OutputStream out=conn.getOutputStream()){out.write(body.getBytes(StandardCharsets.UTF_8));}}
+        try{Response result=new Response();result.status=conn.getResponseCode();result.etag=conn.getHeaderField("ETag");if(result.status==304){result.bytes=new byte[0];result.body="";return result;}if(result.status<200||result.status>=300)throw new RemoteError(result.status);try(InputStream in=conn.getInputStream();ByteArrayOutputStream out=new ByteArrayOutputStream()){byte[] buf=new byte[8192];int n,total=0;while((n=in.read(buf))!=-1){total+=n;if(total>limit)throw new IOException("document_size_limit");out.write(buf,0,n);}result.bytes=out.toByteArray();}result.body=new String(result.bytes,StandardCharsets.UTF_8);return result;}finally{conn.disconnect();}
     }
-    private Response read(String path,boolean raw) throws IOException {
-        String[] cache=store.cache(path);Response r=request(path,"GET",raw,cache==null?null:cache[0],null,Contract.MAX_DOCUMENT_BYTES);
-        if(r.status==304){if(cache==null)throw new IOException("missing_conditional_cache");r.body=cache[1];r.bytes=r.body.getBytes(StandardCharsets.UTF_8);r.etag=cache[0];}return r;
+    private String mainHead() throws IOException {
+        HttpsURLConnection conn=(HttpsURLConnection)new URL(HEAD).openConnection();conn.setInstanceFollowRedirects(false);conn.setConnectTimeout(15000);conn.setReadTimeout(20000);conn.setRequestMethod("GET");conn.setRequestProperty("Authorization","Bearer "+token);conn.setRequestProperty("Accept","application/vnd.github+json");conn.setRequestProperty("X-GitHub-Api-Version","2022-11-28");conn.setRequestProperty("User-Agent","Repeat-It/1");
+        try{int status=conn.getResponseCode();if(status<200||status>=300)throw new RemoteError(status);ByteArrayOutputStream out=new ByteArrayOutputStream();try(InputStream in=conn.getInputStream()){byte[] buf=new byte[4096];int n,total=0;while((n=in.read(buf))!=-1){total+=n;if(total>524288)throw new IOException("head_response_limit");out.write(buf,0,n);}}String json=new String(out.toByteArray(),StandardCharsets.UTF_8);String sha=JsonParser.parseString(json).getAsJsonObject().get("sha").getAsString();if(!sha.matches("[0-9a-f]{40}"))throw new IOException("invalid_head_sha");return sha;}finally{conn.disconnect();}
     }
-    private Map<String,Object> parse(String body){
-        if(body.startsWith("\uFEFF"))body=body.substring(1);
-        String stripped=body.trim();
-        if((stripped.startsWith("```json\n")||stripped.startsWith("```yaml\n"))&&stripped.endsWith("```")){
-            body=stripped.substring(stripped.indexOf('\n')+1,stripped.length()-3);issues.add("removed_document_fence");
-        }
-        LoaderOptions options=new LoaderOptions();options.setAllowDuplicateKeys(false);options.setMaxAliasesForCollections(0);options.setNestingDepthLimit(40);options.setCodePointLimit(Contract.MAX_DOCUMENT_BYTES);
-        return Contract.object(new Yaml(new SafeConstructor(options)).load(body));
-    }
-    private JsonArray directory(String path) throws IOException {
-        Response r=read(path,false);JsonElement data=JsonParser.parseString(r.body);
-        if(!data.isJsonArray()||data.getAsJsonArray().size()>=1000)throw new IOException("directory_truncated_or_invalid");
-        store.cache(path,r.etag,r.body);return data.getAsJsonArray();
-    }
-    private void problem(String path,Exception e) throws IOException {
-        if(e instanceof RemoteError && (((RemoteError)e).status==401||((RemoteError)e).status==403||((RemoteError)e).status==429))throw (RemoteError)e;
-        issues.add(path+":"+e.getClass().getSimpleName());
-    }
-    private void loadCardFile(String path,String sha,Map<String,List<Engine.Card>> collected) throws IOException {
-        try{
-            String[] cache=store.cache(path);Response r;
-            if(cache!=null&&sha.equals(store.value("blob:"+path,""))){r=new Response();r.body=cache[1];r.etag=cache[0];}
-            else r=read(path,true);
-            Contract.Import imported=Contract.deck(parse(r.body));issues.addAll(imported.issues);
-            collected.put(path,imported.cards);
-            if(imported.issues.isEmpty()){store.cache(path,r.etag,r.body);store.put("blob:"+path,sha);}
-        }catch(Exception e){problem(path,e);}
-    }
-    private void discover(Map<String,List<Engine.Card>> files) throws IOException {
-        for(JsonElement raw:directory("learning/decks")) {
-            JsonObject e=raw.getAsJsonObject();String path=e.get("path").getAsString(),type=e.get("type").getAsString();Contract.readPath(path);
-            if(!path.startsWith("learning/decks/")||path.substring("learning/decks/".length()).contains("/"))continue;
-            if(type.equals("file")&&(path.endsWith(".yaml")||path.endsWith(".yml")||path.endsWith(".json")))loadCardFile(path,e.get("sha").getAsString(),files);
-        }
-    }
-    private void image(Engine.Card c) throws IOException {
-        if(c.image.isEmpty())return;
-        File dest=imageFile(context,c.imageHash);
-        if(dest.exists())return;
-        try {
-            Response r=request(c.image,"GET",true,null,null,8*1024*1024);
-            if(!hash(r.bytes).equals(c.imageHash))throw new IOException("image_hash_mismatch");
-            android.graphics.BitmapFactory.Options opts=new android.graphics.BitmapFactory.Options();opts.inJustDecodeBounds=true;
-            android.graphics.BitmapFactory.decodeByteArray(r.bytes,0,r.bytes.length,opts);
-            if(opts.outWidth<=0||opts.outHeight<=0||(long)opts.outWidth*opts.outHeight>64000000)throw new IOException("image_dimensions");
-            dest.getParentFile().mkdirs();File tmp=new File(dest.getParentFile(),c.imageHash+".part");
-            try(FileOutputStream out=new FileOutputStream(tmp)){out.write(r.bytes);out.getFD().sync();}
-            if(!tmp.renameTo(dest))throw new IOException("image_atomic_move");
-        }catch(Exception e){problem(c.image,e);}
-    }
+    private Response read(String path,boolean raw) throws IOException {String[] cache=store.cache(path);Response r=request(path,"GET",raw,cache==null?null:cache[0],null,Contract.MAX_DOCUMENT_BYTES);if(r.status==304){if(cache==null)throw new IOException("missing_conditional_cache");r.body=cache[1];r.bytes=r.body.getBytes(StandardCharsets.UTF_8);r.etag=cache[0];}return r;}
+    private Map<String,Object> parse(String body){if(body.startsWith("\uFEFF"))body=body.substring(1);String stripped=body.trim();if((stripped.startsWith("```json\n")||stripped.startsWith("```yaml\n"))&&stripped.endsWith("```")){body=stripped.substring(stripped.indexOf('\n')+1,stripped.length()-3);issues.add("removed_document_fence");}LoaderOptions options=new LoaderOptions();options.setAllowDuplicateKeys(false);options.setMaxAliasesForCollections(0);options.setNestingDepthLimit(40);options.setCodePointLimit(Contract.MAX_DOCUMENT_BYTES);return Contract.object(new Yaml(new SafeConstructor(options)).load(body));}
+    private JsonArray directory(String path) throws IOException {Response r=read(path,false);JsonElement data=JsonParser.parseString(r.body);if(!data.isJsonArray()||data.getAsJsonArray().size()>=1000)throw new IOException("directory_truncated_or_invalid");store.cache(path,r.etag,r.body);return data.getAsJsonArray();}
+    private void problem(String path,Exception e) throws IOException {if(e instanceof RemoteError&&(((RemoteError)e).status==401||((RemoteError)e).status==403||((RemoteError)e).status==429))throw (RemoteError)e;issues.add(path+":"+e.getClass().getSimpleName());}
+    private void loadCardFile(String path,String sha,Map<String,List<Engine.Card>> collected) throws IOException {try{String[] cache=store.cache(path);Response r;if(cache!=null&&sha.equals(store.value("blob:"+path,""))){r=new Response();r.body=cache[1];r.etag=cache[0];}else r=read(path,true);Contract.Import imported=Contract.deck(parse(r.body));issues.addAll(imported.issues);collected.put(path,imported.cards);if(imported.issues.isEmpty()){store.cache(path,r.etag,r.body);store.put("blob:"+path,sha);}}catch(Exception e){problem(path,e);}}
+    private Set<String> discover(Map<String,List<Engine.Card>> files) throws IOException {Set<String> remotePaths=new LinkedHashSet<>();for(JsonElement raw:directory("learning/decks")){JsonObject e=raw.getAsJsonObject();String path=e.get("path").getAsString(),type=e.get("type").getAsString();Contract.readPath(path);if(!path.startsWith("learning/decks/")||path.substring("learning/decks/".length()).contains("/"))continue;if(type.equals("file")&&(path.endsWith(".yaml")||path.endsWith(".yml")||path.endsWith(".json"))){remotePaths.add(path);loadCardFile(path,e.get("sha").getAsString(),files);}}return remotePaths;}
+    private void image(Engine.Card c) throws IOException {if(c.image.isEmpty())return;File dest=imageFile(context,c.imageHash);if(dest.exists())return;try{Response r=request(c.image,"GET",true,null,null,8*1024*1024);if(!hash(r.bytes).equals(c.imageHash))throw new IOException("image_hash_mismatch");android.graphics.BitmapFactory.Options opts=new android.graphics.BitmapFactory.Options();opts.inJustDecodeBounds=true;android.graphics.BitmapFactory.decodeByteArray(r.bytes,0,r.bytes.length,opts);if(opts.outWidth<=0||opts.outHeight<=0||(long)opts.outWidth*opts.outHeight>64000000)throw new IOException("image_dimensions");dest.getParentFile().mkdirs();File tmp=new File(dest.getParentFile(),c.imageHash+".part");try(FileOutputStream out=new FileOutputStream(tmp)){out.write(r.bytes);out.getFD().sync();}if(!tmp.renameTo(dest))throw new IOException("image_atomic_move");}catch(Exception e){problem(c.image,e);}}
     public static File imageFile(Context c,String hash){if(!hash.matches("[0-9a-f]{64}"))throw new IllegalArgumentException("image_hash");return new File(c.getFilesDir(),"images/"+hash);}
+    private void loadKnowledge(String ref) throws IOException {sourceRef=ref;Map<String,List<Engine.Card>> material=new LinkedHashMap<>();Set<String> remotePaths=discover(material);issues.addAll(store.importCards(material,remotePaths));for(String path:List.of("learning/settings.json","learning/plans.json")){try{Response r=read(path,true);Map<String,Object> data=parse(r.body);if(path.endsWith("settings.json"))store.settings(data);else store.setPlans(Contract.plans(data));store.cache(path,r.etag,r.body);}catch(Exception e){problem(path,e);}}for(Engine.Card c:store.cards())image(c);}
     private String readRemote(String path) throws IOException {try{return request(path,"GET",true,null,null,4*1024*1024).body;}catch(RemoteError e){if(e.status==404)return null;throw e;}}
-    private void put(String path,String contents,String sha) throws IOException {
-        Map<String,Object> payload=new LinkedHashMap<>();payload.put("message","Repeat It device progress");payload.put("branch","main");payload.put("content",Base64.getEncoder().encodeToString(contents.getBytes(StandardCharsets.UTF_8)));if(sha!=null)payload.put("sha",sha);
-        request(path,"PUT",false,null,Store.JSON.toJson(payload),1024*1024);
-    }
+    private void put(String path,String contents,String sha) throws IOException {Map<String,Object> payload=new LinkedHashMap<>();payload.put("message","Repeat It device progress");payload.put("branch","main");payload.put("content",Base64.getEncoder().encodeToString(contents.getBytes(StandardCharsets.UTF_8)));if(sha!=null)payload.put("sha",sha);request(path,"PUT",false,null,Store.JSON.toJson(payload),1024*1024);}
     private boolean matches(String actual,String expected){return actual!=null&&hash(actual.getBytes(StandardCharsets.UTF_8)).equals(hash(expected.getBytes(StandardCharsets.UTF_8)));}
-    private void immutable(String path,String body) throws IOException {
-        String remote=readRemote(path);
-        if(remote!=null){if(!matches(remote,body))throw new IOException("immutable_batch_conflict");return;}
-        try{put(path,body,null);}catch(IOException unknown){if(matches(readRemote(path),body))return;throw unknown;}
-        if(!matches(readRemote(path),body))throw new IOException("batch_readback_failed");
-    }
-    private void summary(String path,String body) throws IOException {
-        String old=readRemote(path);if(matches(old,body))return;
-        String sha=null;
-        if(old!=null){Response meta=request(path,"GET",false,null,null,4*1024*1024);sha=JsonParser.parseString(meta.body).getAsJsonObject().get("sha").getAsString();}
-        try{put(path,body,sha);}catch(IOException e){if(matches(readRemote(path),body))return;throw e;}
-        if(!matches(readRemote(path),body))throw new IOException("summary_readback_failed");
-    }
+    private void immutable(String path,String body) throws IOException {String remote=readRemote(path);if(remote!=null){if(!matches(remote,body))throw new IOException("immutable_batch_conflict");return;}try{put(path,body,null);}catch(IOException unknown){if(matches(readRemote(path),body))return;throw unknown;}if(!matches(readRemote(path),body))throw new IOException("batch_readback_failed");}
+    private void summary(String path,String body) throws IOException {String old=readRemote(path);if(matches(old,body))return;String sha=null;if(old!=null){Response meta=request(path,"GET",false,null,null,4*1024*1024);sha=JsonParser.parseString(meta.body).getAsJsonObject().get("sha").getAsString();}try{put(path,body,sha);}catch(IOException e){if(matches(readRemote(path),body))return;throw e;}if(!matches(readRemote(path),body))throw new IOException("summary_readback_failed");}
     public void run() throws IOException {
-        Map<String,List<Engine.Card>> material=new LinkedHashMap<>();discover(material);issues.addAll(store.importCards(material));
-        for(String path:List.of("learning/settings.json","learning/plans.json")){
-            try{Response r=read(path,true);Map<String,Object> data=parse(r.body);if(path.endsWith("settings.json"))store.settings(data);else store.setPlans(Contract.plans(data));store.cache(path,r.etag,r.body);}
-            catch(Exception e){problem(path,e);}
-        }
-        for(Engine.Card c:store.cards())image(c);
-        for(Store.Batch b:store.batches()) {
-            String path="learning/progress/"+store.device()+"/"+(b.mode.equals("normal")?"":"test-"+b.mode+"/")+b.id+".jsonl";
-            immutable(path,b.body);store.verified(b.id);
-        }
-        summary("learning/progress/"+store.device()+"/summary.json",store.summary());
-        store.put("last_sync",java.time.Instant.now().toString());store.put("sync_error",issues.isEmpty()?"":String.join("\n",issues.subList(0,Math.min(30,issues.size()))));
+        String stable=null;for(int attempt=0;attempt<3;attempt++){String before=mainHead();issues.clear();loadKnowledge(before);String after=mainHead();if(before.equals(after)){stable=before;break;}}
+        if(stable==null)throw new IOException("idea_hub_main_changed_repeatedly");sourceRef=stable;
+        for(Store.Batch b:store.batches()){String path="learning/progress/"+store.device()+"/"+(b.mode.equals("normal")?"":"test-"+b.mode+"/")+b.id+".jsonl";immutable(path,b.body);store.verified(b.id);}
+        summary("learning/progress/"+store.device()+"/summary.json",store.summary());store.put("last_sync_source_sha",stable);store.put("last_sync",java.time.Instant.now().toString());store.put("sync_error",issues.isEmpty()?"":String.join("\n",issues.subList(0,Math.min(30,issues.size()))));
     }
 }
