@@ -56,13 +56,15 @@ public final class OverlayStressTest {
         int start=dump.lastIndexOf("Window #",owner),end=dump.indexOf("Window #",owner+1);
         if(start<0)start=Math.max(0,owner-1000);if(end<0)end=Math.min(dump.length(),owner+5000);
         String block=dump.substring(start,end);
-        return block.contains("mPolicyVisibility=true")&&block.contains("Surface: shown=true")&&block.contains("isVisible=true");
+        // Android's text dump is not a stable API: some builds omit mPolicyVisibility when true.
+        // Surface/on-screen/visible are the durable observable result; protected Settings makes all three false.
+        return block.contains("Surface: shown=true")&&block.contains("isOnScreen=true")&&block.contains("isVisible=true");
     }
 
     private static void waitWindow(UiDevice device,boolean visible) throws Exception {
         long end=System.currentTimeMillis()+UI_TIMEOUT;
         while(System.currentTimeMillis()<end){if(windowVisible(device)==visible)return;Thread.sleep(100);}
-        assertEquals("Unexpected OS policy visibility for overlay",visible,windowVisible(device));
+        assertEquals("Unexpected OS visibility for overlay",visible,windowVisible(device));
     }
 
     private static void tapReaction(UiDevice device,boolean repeat){
