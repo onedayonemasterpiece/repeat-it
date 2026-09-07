@@ -70,6 +70,9 @@ public final class CoreChecks {
 
         Engine.Card deckA=card(0),deckB=card(1),deckC=card(2);deckA.deck="a";deckB.deck="b";deckC.deck="c";Engine.Plan a=undatedPlan(),b=undatedPlan(),c=undatedPlan();a.deck="a";b.deck="b";c.deck="c";
         Engine.Decision oneOfMany=Engine.next(List.of(deckA,deckB,deckC),List.of(a,b,c),Map.of(),NOW,W,List.of());check(oneOfMany.cardKey!=null&&oneOfMany.remaining==15,"many decks still produce exactly one next identity");
+        Engine.Card oldCard=card(10),salvageable=card(11);oldCard.deck="old";salvageable.deck="salvage";Engine.Plan oldPlan=new Engine.Plan(),salvagePlan=new Engine.Plan();oldPlan.deck="old";oldPlan.deadline=NOW.minus(Duration.ofHours(1));salvagePlan.deck="salvage";salvagePlan.deadline=NOW.plus(Duration.ofMinutes(10));
+        Engine.Decision protectFuture=Engine.next(List.of(oldCard,salvageable),List.of(oldPlan,salvagePlan),Map.of(),NOW,W,List.of());check(protectFuture.cardKey.equals(salvageable.key()),"salvageable deadline inside human gap beats already-missed backlog");
+        salvagePlan.deadline=NOW.plus(Duration.ofDays(1));Engine.Decision fillSlack=Engine.next(List.of(oldCard,salvageable),List.of(oldPlan,salvagePlan),Map.of(),NOW,W,List.of());check(fillSlack.cardKey.equals(oldCard.key()),"overdue work fills slack when future deadline is not imminent");
 
         Map<String,Object> doc=document();check(Contract.deck(doc).cards.size()==1,"canonical deck imports");Map<String,Object> empty=document();empty.put("cards",List.of());rejects(()->Contract.deck(empty),"empty logical deck rejected");
         ((Map<String,Object>)((List<?>)doc.get("cards")).get(0)).put("revision","2");check(Contract.deck(doc).cards.get(0).revision==2,"numeric-string safe recovery");
