@@ -140,7 +140,10 @@ public final class Engine {
         Item selected=null; Instant bestDue=null;
         Instant deadlineBase=dated.isEmpty()?null:w.add(now,result.spacingMillis);
         for(Item x:dated) {
-            Instant due=x.eligible.isAfter(deadlineBase)?x.eligible:deadlineBase;
+            // A failed self-report is actionable weakness: do not let the aggregate cadence postpone
+            // its explicitly earlier per-card retry. For all other dated cards the aggregate workload
+            // still determines the next slot and prevents distant plans from diluting urgent work.
+            Instant due="repeat".equals(x.s.lastReaction)?x.eligible:(x.eligible.isAfter(deadlineBase)?x.eligible:deadlineBase);
             if(!due.isBefore(x.p.deadline)) {result.feasibility="insufficient_window_under_spacing_heuristic";continue;}
             if(selected==null || due.isBefore(bestDue) || (due.equals(bestDue) && priority(x,selected)<0)) {
                 selected=x; bestDue=due;
