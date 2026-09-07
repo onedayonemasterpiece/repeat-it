@@ -17,6 +17,8 @@ public class StorageCycleTest {
     private static Engine.Card card(String deck,String id){Engine.Card c=new Engine.Card();c.deck=deck;c.id=id;c.title="Synthetic "+id;c.text="Public test only";return c;}
     @Test public void transactionRecoveryIsolationOutboxAndHumanDelay() {
         Context c=InstrumentationRegistry.getInstrumentation().getTargetContext();Store s=Store.get(c);assertEquals("Fresh emulator only",0,s.cards().size());ZoneId zone=ZoneId.systemDefault();
+        // This test drives Store time manually. Isolate it from the now-auto-active delivery service; OverlayStressTest separately proves autonomous startup.
+        s.put("paused","true");c.stopService(new android.content.Intent(c,OverlayService.class));Delivery.arm(c);
         Instant start=ZonedDateTime.of(LocalDate.of(2026,9,7),LocalTime.NOON,zone).toInstant();Store.clock=Clock.fixed(start,zone);
         try {
             Engine.Card base=card("synthetic","transaction");s.importCards(Map.of("learning/decks/synthetic.yaml",List.of(base)));Engine.Plan plan=new Engine.Plan();plan.deck="synthetic";plan.deadline=start.plus(Duration.ofDays(2));s.setPlans(List.of(plan));
