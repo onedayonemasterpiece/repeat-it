@@ -6,13 +6,14 @@ import android.os.*;
 import com.onedayonemasterpiece.repeatit.core.Engine;
 import java.time.Instant;
 
+/** Autonomous delivery. There is no separate hidden "enabled" gate: only an explicit user pause stops work. */
 public final class Delivery {
     private Delivery(){}
     public static final String CHANGED="com.onedayonemasterpiece.repeatit.CHANGED";
     public static PendingIntent alarmIntent(Context c){return PendingIntent.getBroadcast(c,41,new Intent(c,RecoveryReceiver.class).setAction("com.onedayonemasterpiece.repeatit.DUE"),PendingIntent.FLAG_UPDATE_CURRENT|PendingIntent.FLAG_IMMUTABLE);}
     public static void arm(Context c){
         Store s=Store.get(c);AlarmManager alarms=c.getSystemService(AlarmManager.class);PendingIntent intent=alarmIntent(c);alarms.cancel(intent);
-        if(!s.value("enabled","false").equals("true")||s.value("paused","false").equals("true"))return;
+        if(s.value("paused","false").equals("true"))return;
         Instant now=Instant.now();Engine.Decision d=s.decision();Instant at=null;
         if(!s.mode().equals("normal")){
             // A due test alarm gets one attempt. If the device is not surface-ready, screen/app activity will retry it; never spin every second.
@@ -31,8 +32,9 @@ public final class Delivery {
         s.put("alarm_precision",exact?"exact_non_wakeup":"inexact_non_wakeup");
     }
     public static void start(Context c){
-        Store s=Store.get(c);if(!s.value("enabled","false").equals("true"))return;
+        Store s=Store.get(c);
+        if(s.value("paused","false").equals("true")){c.stopService(new Intent(c,OverlayService.class));return;}
         try{c.startForegroundService(new Intent(c,OverlayService.class));s.put("delivery_error","");}
-        catch(IllegalStateException|SecurityException e){s.put("delivery_error","Откройте приложение для возобновления: "+e.getClass().getSimpleName());}
+        catch(IllegalStateException|SecurityException e){s.put("delivery_error","Android запретил фоновый запуск; откройте Repeat It один раз: "+e.getClass().getSimpleName());}
     }
 }

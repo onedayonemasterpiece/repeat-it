@@ -12,14 +12,15 @@ public final class AdminProvider extends ContentProvider {
     private void shell(){if(Binder.getCallingUid()!=2000)throw new SecurityException("ADB shell only");}
     @Override public boolean onCreate(){return true;}
     @Override public Bundle call(String method,String arg,Bundle extras){
-        shell();Context c=getContext();Store s=Store.get(c);Bundle reply=new Bundle();
+        shell();Context c=getContext();Store s=Store.get(c);Bundle reply=new Bundle();boolean mutating=!method.equals("status");
         if(method.equals("mode"))s.setMode(arg);
         else if(method.equals("due"))s.forceDue();
         else if(method.equals("sync"))SyncWorker.configure(c,true);
+        else if(method.equals("pause")){s.put("paused",String.valueOf("true".equals(arg)));s.put("last_ui_action","admin_pause_"+arg+"@"+java.time.Instant.now());}
         else if(method.equals("widget_verified")){s.put("widget_verified",String.valueOf("true".equals(arg)));PreviewWidget.refresh(c);}
         else if(!method.equals("status"))throw new IllegalArgumentException("unknown_command");
-        Delivery.arm(c);c.sendBroadcast(new Intent(Delivery.CHANGED).setPackage(c.getPackageName()));Store.Pending pending=s.pending();com.onedayonemasterpiece.repeatit.core.Engine.Decision d=s.decision();
-        reply.putString("mode",s.mode());reply.putString("pending_id",pending==null?"":pending.id);reply.putInt("cards",s.cards().size());reply.putInt("events",s.eventCount(false));reply.putInt("verified_events",s.eventCount(true));reply.putString("next_due",String.valueOf(d.due));reply.putInt("remaining",d.remaining);reply.putInt("overdue",d.expired);reply.putString("feasibility",d.feasibility);reply.putString("overlay_geometry",s.value("overlay_geometry",""));reply.putString("sync_error",s.value("sync_error",""));reply.putString("sync_requested_at",s.value("sync_requested_at",""));reply.putString("last_sync",s.value("last_sync",""));reply.putString("last_sync_source_sha",s.value("last_sync_source_sha",""));reply.putString("delivery_error",s.value("delivery_error",""));reply.putString("device_id",s.device());return reply;
+        Delivery.arm(c);if(mutating&&!s.value("paused","false").equals("true"))Delivery.start(c);c.sendBroadcast(new Intent(Delivery.CHANGED).setPackage(c.getPackageName()));Store.Pending pending=s.pending();com.onedayonemasterpiece.repeatit.core.Engine.Decision d=s.decision();
+        reply.putString("mode",s.mode());reply.putBoolean("paused",s.value("paused","false").equals("true"));reply.putBoolean("overlay_visible",s.value("overlay_visible","false").equals("true"));reply.putString("last_ui_action",s.value("last_ui_action",""));reply.putString("pending_id",pending==null?"":pending.id);reply.putInt("cards",s.cards().size());reply.putInt("events",s.eventCount(false));reply.putInt("verified_events",s.eventCount(true));reply.putString("next_due",String.valueOf(d.due));reply.putInt("remaining",d.remaining);reply.putInt("overdue",d.expired);reply.putString("feasibility",d.feasibility);reply.putString("overlay_geometry",s.value("overlay_geometry",""));reply.putString("sync_error",s.value("sync_error",""));reply.putString("sync_requested_at",s.value("sync_requested_at",""));reply.putString("last_sync",s.value("last_sync",""));reply.putString("last_sync_source_sha",s.value("last_sync_source_sha",""));reply.putString("delivery_error",s.value("delivery_error",""));reply.putString("device_id",s.device());return reply;
     }
     @Override public ParcelFileDescriptor openFile(Uri uri,String mode) throws FileNotFoundException {
         shell();if(!"/provision".equals(uri.getPath())||!"w".equals(mode))throw new FileNotFoundException("write-only provisioning");
