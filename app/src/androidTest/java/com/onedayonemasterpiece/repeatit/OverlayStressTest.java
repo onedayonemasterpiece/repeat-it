@@ -5,10 +5,7 @@ import android.content.Intent;
 import android.provider.Settings;
 import androidx.test.ext.junit.runners.AndroidJUnit4;
 import androidx.test.platform.app.InstrumentationRegistry;
-import androidx.test.uiautomator.By;
 import androidx.test.uiautomator.UiDevice;
-import androidx.test.uiautomator.UiObject2;
-import androidx.test.uiautomator.Until;
 import com.onedayonemasterpiece.repeatit.core.Engine;
 import java.io.File;
 import java.io.FileWriter;
@@ -32,13 +29,6 @@ public final class OverlayStressTest {
         c.sendBroadcast(new Intent(Delivery.CHANGED).setPackage(c.getPackageName()));
     }
 
-    private static UiObject2 waitButton(UiDevice device,String text){
-        UiObject2 value=device.wait(Until.findObject(By.text(text)),UI_TIMEOUT);
-        assertNotNull("Overlay button missing: "+text,value);
-        assertEquals("Overlay must belong to Repeat It","com.onedayonemasterpiece.repeatit",value.getApplicationPackage());
-        return value;
-    }
-
     private static void waitActivityHidden() throws Exception {
         long end=System.currentTimeMillis()+UI_TIMEOUT;
         while(System.currentTimeMillis()<end&&MainActivity.visible)Thread.sleep(50);
@@ -54,6 +44,23 @@ public final class OverlayStressTest {
         }
     }
 
+    private static void waitControls() throws Exception {
+        long end=System.currentTimeMillis()+UI_TIMEOUT;
+        while(System.currentTimeMillis()<end){
+            if(OverlayService.rememberX>0&&OverlayService.rememberY>0&&OverlayService.repeatX>0&&OverlayService.repeatY>0)return;
+            Thread.sleep(40);
+        }
+        fail("Overlay reaction hit targets were not laid out");
+    }
+
+    private static void tapReaction(UiDevice device,boolean repeat){
+        int x=repeat?OverlayService.repeatX:OverlayService.rememberX;
+        int y=repeat?OverlayService.repeatY:OverlayService.rememberY;
+        assertTrue("Reaction X outside display: "+x,x>0&&x<device.getDisplayWidth());
+        assertTrue("Reaction Y outside display: "+y,y>0&&y<device.getDisplayHeight());
+        assertTrue("Native reaction tap rejected",device.click(x,y));
+    }
+
     private static void writeDebug(Context c,UiDevice device,Store store,String stage) {
         File root=c.getExternalFilesDir(null);
         try(FileWriter out=new FileWriter(new File(root,"overlay-stress-debug.txt"),true)){
@@ -66,6 +73,8 @@ public final class OverlayStressTest {
             out.write("pending_id="+(p==null?"":p.id)+"\npending_shown="+(p==null?0:p.shown)+"\n");
             out.write("next_due="+String.valueOf(store.decision().due)+"\n");
             out.write("overlay_geometry="+store.value("overlay_geometry","")+"\n");
+            out.write("remember_center="+OverlayService.rememberX+","+OverlayService.rememberY+"\n");
+            out.write("repeat_center="+OverlayService.repeatX+","+OverlayService.repeatY+"\n");
             out.write("delivery_error="+store.value("delivery_error","")+"\nsync_error="+store.value("sync_error","")+"\n---\n");
         }catch(Exception ignored){}
         try{device.dumpWindowHierarchy(new File(root,"overlay-window-hierarchy.xml"));}catch(Exception ignored){}
@@ -120,14 +129,13 @@ public final class OverlayStressTest {
         int screenCycles=0,appSwitches=1,rotations=0;
         try {
             for(int i=0;i<CYCLES;i++){
-                store.forceDue();changed(c);waitPresentation(store);
+                store.forceDue();changed(c);waitPresentation(store);waitControls();
                 writeDebug(c,device,store,"cycle_"+i+"_presented");
                 Store.Pending presented=store.pending();
                 assertNotNull("Due card must become pending",presented);
                 assertTrue("Pending was not actually presented; delivery_error="+store.value("delivery_error",""),presented.shown>0);
                 assertGeometry(store);
-                UiObject2 remember=waitButton(device,"Помню");
-                waitButton(device,"Повторить");
+                assertTrue("Reaction centers must be distinct",OverlayService.rememberX!=OverlayService.repeatX);
 
                 if(i==10||i==29){
                     String pendingId=presented.id;
@@ -135,20 +143,19 @@ public final class OverlayStressTest {
                     assertEquals("Pending must survive screen-off",pendingId,store.pending().id);
                     device.wakeUp();device.executeShellCommand("wm dismiss-keyguard");Thread.sleep(450);changed(c);
                     assertEquals("Pending must survive screen-on",pendingId,store.pending().id);
-                    waitButton(device,"Помню");screenCycles++;
+                    waitControls();screenCycles++;
                 }
                 if(i==20){
-                    device.setOrientationLeft();Thread.sleep(650);changed(c);waitButton(device,"Помню");assertGeometry(store);
-                    device.setOrientationNatural();Thread.sleep(650);changed(c);waitButton(device,"Помню");assertGeometry(store);
+                    device.setOrientationLeft();Thread.sleep(650);changed(c);waitControls();assertGeometry(store);
+                    device.setOrientationNatural();Thread.sleep(650);changed(c);waitControls();assertGeometry(store);
                     device.unfreezeRotation();rotations++;
                 }
                 if(i>0&&i%5==0){
                     device.executeShellCommand(i%10==0?"am start -a android.settings.WIFI_SETTINGS":"am start -a android.settings.SETTINGS");
-                    Thread.sleep(450);waitActivityHidden();changed(c);waitButton(device,"Помню");appSwitches++;
+                    Thread.sleep(450);waitActivityHidden();changed(c);waitControls();appSwitches++;
                 }
 
-                UiObject2 action=(i%3==0)?waitButton(device,"Повторить"):remember;
-                action.click();
+                tapReaction(device,i%3==0);
                 waitEvents(store,i+1);
                 assertNull("Answered pending must close",store.pending());
                 assertEquals("Stress must not write verified normal progress",0,store.eventCount(true));
