@@ -9,6 +9,7 @@ import android.net.Uri;
 import android.text.InputType;
 import android.view.*;
 import android.widget.*;
+import androidx.core.content.ContextCompat;
 import com.onedayonemasterpiece.repeatit.core.Engine;
 
 public final class MainActivity extends Activity {
@@ -39,7 +40,7 @@ public final class MainActivity extends Activity {
                 }).setNegativeButton("Отмена",(d,w)->entry.getText().clear()).create();dialog.show();dialog.getWindow().addFlags(WindowManager.LayoutParams.FLAG_SECURE);
         });
         ScrollView scroll=new ScrollView(this);scroll.addView(page);setContentView(scroll);
-        if(Build.VERSION.SDK_INT>=33)registerReceiver(changed,new IntentFilter(Delivery.CHANGED),Context.RECEIVER_NOT_EXPORTED);else registerReceiver(changed,new IntentFilter(Delivery.CHANGED));
+        ContextCompat.registerReceiver(this,changed,new IntentFilter(Delivery.CHANGED),ContextCompat.RECEIVER_NOT_EXPORTED);
         SyncWorker.configure(this,true);
     }
     private void button(LinearLayout parent,String label,Runnable action){Button b=new Button(this);b.setText(label);b.setOnClickListener(v->action.run());parent.addView(b);}
