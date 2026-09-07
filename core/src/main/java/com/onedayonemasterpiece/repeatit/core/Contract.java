@@ -47,16 +47,16 @@ public final class Contract {
         if(version!=2 && version!=3)throw new IllegalArgumentException("unsupported_schema");
         String deck=id(root.get("deck_id"));
         Import out=new Import();
-        if(version==3 && root.containsKey("card_id")) {
-            out.cards.add(card(root,deck,3));return out;
-        }
-        if(version!=2)throw new IllegalArgumentException("expected_card_document");
         Object list=root.get("cards");
+        if(version==3) {
+            if(!root.containsKey("revision")||!root.containsKey("title")||!root.containsKey("language"))
+                throw new IllegalArgumentException("invalid_deck_metadata");
+        }
         if(!(list instanceof List)||((List<?>)list).size()>MAX_CARDS)throw new IllegalArgumentException("invalid_cards");
         Map<String,List<Engine.Card>> groups=new LinkedHashMap<>();
         int i=0;
         for(Object raw:(List<?>)list) {
-            try {Engine.Card c=card(object(raw),deck,2);groups.computeIfAbsent(c.key(),k->new ArrayList<>()).add(c);}
+            try {Engine.Card c=card(object(raw),deck,version);groups.computeIfAbsent(c.key(),k->new ArrayList<>()).add(c);}
             catch(RuntimeException e){out.issues.add("card["+i+"]:"+e.getMessage());}
             i++;
         }
@@ -73,6 +73,7 @@ public final class Contract {
         // The legacy v2 revision was explicitly presentation_only, not a reset of meaning.
         c.meaning=version==2?1:positive(m.get("meaning_revision"),1000000);
         c.title=text(m.get("title"),512);c.text=text(m.get("text"),24000);
+        if(version==3&&!m.containsKey("status"))throw new IllegalArgumentException("status_required");
         c.active=!"archived".equals(m.get("status"));
         if(m.containsKey("status")&&!Set.of("active","archived").contains(m.get("status")))throw new IllegalArgumentException("invalid_status");
         // Missing/invalid preview consent is private, never permissive coercion.
@@ -105,7 +106,10 @@ public final class Contract {
             Map<String,Object> m=object(raw); Engine.Plan p=new Engine.Plan();p.deck=id(m.get("deck_id"));
             if(!seen.add(p.deck))throw new IllegalArgumentException("duplicate_plan");
             p.minimum=positive(m.get("minimum_contacts"),1000);if(p.minimum<5)throw new IllegalArgumentException("minimum_contacts_below_five");
+            if(!(m.get("active") instanceof Boolean))throw new IllegalArgumentException("plan_active_must_be_boolean");
+            if(!m.containsKey("deadline"))throw new IllegalArgumentException("deadline_required_explicit_null_allowed");
             p.active=Boolean.TRUE.equals(m.get("active"));
+            if(p.active&&m.get("deadline")==null)throw new IllegalArgumentException("active_plan_requires_deadline");
             if(m.get("deadline")!=null) {
                 p.deadline=OffsetDateTime.parse(text(m.get("deadline"),64)).toInstant();
                 if(Duration.between(Instant.now(),p.deadline).abs().toDays()>36525)throw new IllegalArgumentException("deadline_bounds");

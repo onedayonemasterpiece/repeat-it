@@ -14,7 +14,8 @@ public final class CoreChecks {
     private static Engine.Plan plan(int days){Engine.Plan p=new Engine.Plan();p.deck="synthetic";p.deadline=NOW.plus(Duration.ofDays(days));return p;}
     private static List<Engine.Card> cards(int n){List<Engine.Card>x=new ArrayList<>();for(int i=0;i<n;i++)x.add(card(i));return x;}
     private static Engine.Decision decision(int n,int days){return Engine.next(cards(n),List.of(plan(days)),Map.of(),NOW,W,List.of());}
-    private static Map<String,Object> document(){Map<String,Object> c=new LinkedHashMap<>();c.put("schema_version",3);c.put("deck_id","synthetic");c.put("card_id","card-0");c.put("revision",1);c.put("meaning_revision",1);c.put("mode","exposure");c.put("title","Synthetic title");c.put("text","Synthetic public test only");c.put("source_refs",List.of(Map.of("url","https://example.invalid/source")));return c;}
+    private static Map<String,Object> cardDoc(){Map<String,Object> c=new LinkedHashMap<>();c.put("card_id","card-0");c.put("revision",1);c.put("meaning_revision",1);c.put("mode","exposure");c.put("status","active");c.put("title","Synthetic title");c.put("text","Synthetic public test only");c.put("source_refs",List.of(Map.of("url","https://example.invalid/source")));return c;}
+    private static Map<String,Object> document(){Map<String,Object> d=new LinkedHashMap<>();d.put("schema_version",3);d.put("deck_id","synthetic");d.put("revision",1);d.put("title","Synthetic deck");d.put("language","en");d.put("cards",List.of(cardDoc()));return d;}
     public static void main(String[] args){
         check(decision(10,2).spacingMillis<decision(10,30).spacingMillis,"closer deadline denser");
         check(decision(100,2).spacingMillis<decision(10,2).spacingMillis,"larger corpus denser");
@@ -46,18 +47,27 @@ public final class CoreChecks {
         check(delayed.spacingMillis<decision(10,2).spacingMillis,"missed time recalculates future density");
         check(decision(10,2).feasibility.startsWith("preliminary"),"no invented human capacity");
         check(Engine.next(cards(100),List.of(p),Map.of(),NOW,W,List.of(99999999L,99999999L,99999999L,99999999L,99999999L)).feasibility.startsWith("risk_from"),"empirical risk labelled separately");
-        Map<String,Object> doc=document();check(Contract.deck(doc).cards.size()==1,"canonical card imports");
-        doc.put("revision","2");check(Contract.deck(doc).cards.get(0).revision==2,"numeric-string safe recovery");
-        doc.put("lockscreen_preview","true");check(!Contract.deck(doc).cards.get(0).preview,"string true never privacy consent");
-        doc.put("image",Map.of("path","https://evil.invalid/file"));check(Contract.deck(doc).cards.get(0).image.isEmpty(),"bad image preserves text");
+        Map<String,Object> doc=document();check(Contract.deck(doc).cards.size()==1,"canonical deck imports");
+        ((Map<String,Object>)((List<?>)doc.get("cards")).get(0)).put("revision","2");check(Contract.deck(doc).cards.get(0).revision==2,"numeric-string safe recovery");
+        ((Map<String,Object>)((List<?>)doc.get("cards")).get(0)).put("lockscreen_preview","true");check(!Contract.deck(doc).cards.get(0).preview,"string true never privacy consent");
+        ((Map<String,Object>)((List<?>)doc.get("cards")).get(0)).put("image",Map.of("path","https://evil.invalid/file"));check(Contract.deck(doc).cards.get(0).image.isEmpty(),"bad image preserves text");
         doc.put("schema_version",999);rejects(()->Contract.deck(doc),"future major not guessed");
         rejects(()->Contract.readPath("learning/../private"),"traversal rejected");
         rejects(()->Contract.readPath("learning/%2e%2e/private"),"encoded traversal rejected");
         rejects(()->Contract.writePath("device-a","learning/progress/device-b/x.jsonl"),"write cannot cross device");
         rejects(()->Contract.writePath("device-a","learning/decks/x.json"),"write cannot mutate knowledge");
-        Map<String,Object> bad=document();bad.remove("text");Map<String,Object> legacy=new LinkedHashMap<>();legacy.put("schema_version",2);legacy.put("deck_id","synthetic");legacy.put("cards",List.of(document(),bad));
+        Map<String,Object> bad=cardDoc();bad.remove("text");Map<String,Object> legacy=new LinkedHashMap<>();legacy.put("schema_version",2);legacy.put("deck_id","synthetic");legacy.put("cards",List.of(cardDoc(),bad));
         Contract.Import imported=Contract.deck(legacy);check(imported.cards.size()==1&&imported.issues.size()==1,"bad sibling isolated");
-        legacy.put("cards",List.of(document(),document()));check(Contract.deck(legacy).cards.isEmpty(),"duplicate identity quarantined not last wins");
+        legacy.put("cards",List.of(cardDoc(),cardDoc()));check(Contract.deck(legacy).cards.isEmpty(),"duplicate identity quarantined not last wins");
+        Engine.Plan nightPlan=plan(2);nightPlan.deadline=Instant.parse("2026-09-08T02:00:00Z");
+        Engine.Decision noWindow=Engine.next(cards(1),List.of(nightPlan),Map.of(),Instant.parse("2026-09-07T23:30:00Z"),W,List.of());
+        check(noWindow.due==null&&noWindow.loads.get(0).requiredPerAllowedHour==null,"no window is JSON-safe, not Infinity");
+        Map<String,Object> badActive=new LinkedHashMap<>();badActive.put("deck_id","synthetic");badActive.put("minimum_contacts",5);badActive.put("active","true");badActive.put("deadline","2026-09-09T20:00:00Z");
+        rejects(()->Contract.plans(Map.of("schema_version",1,"plans",List.of(badActive))),"corrupt active flag cannot silently disable plan");
+        badActive.put("active",true);badActive.put("deadline",null);
+        rejects(()->Contract.plans(Map.of("schema_version",1,"plans",List.of(badActive))),"active plan cannot invent missing deadline");
+        badActive.put("active",false);check(Contract.plans(Map.of("schema_version",1,"plans",List.of(badActive))).size()==1,"inactive null deadline is valid");
+        Map<String,Object> noStatus=document();((Map<String,Object>)((List<?>)noStatus.get("cards")).get(0)).remove("status");Contract.Import noStatusImport=Contract.deck(noStatus);check(noStatusImport.cards.isEmpty()&&!noStatusImport.issues.isEmpty(),"missing v3 status quarantines card instead of activating it");
         List<Engine.Card> all=cards(40);Map<String,Engine.State> history=new HashMap<>();Instant now=NOW;int answered=0;
         for(int iteration=0;iteration<300;iteration++) {
             Engine.Decision d=Engine.next(all,List.of(p),history,now,W,List.of());

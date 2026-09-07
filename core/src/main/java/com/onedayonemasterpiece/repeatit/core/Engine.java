@@ -77,7 +77,7 @@ public final class Engine {
         public Instant deadline;
         public int cumulative;
         public long availableMillis;
-        public double requiredPerAllowedHour;
+        public Double requiredPerAllowedHour; // null when no permitted window remains; JSON must never contain Infinity
     }
     public static final class Decision {
         public String cardKey;
@@ -115,7 +115,7 @@ public final class Engine {
             Instant deadline=items.get(i).p.deadline;
             do { count+=items.get(i++).n; } while(i<items.size()&&items.get(i).p.deadline.equals(deadline));
             Load l=new Load(); l.deadline=deadline; l.cumulative=count; l.availableMillis=w.available(now,deadline);
-            l.requiredPerAllowedHour=l.availableMillis==0?Double.POSITIVE_INFINITY:count*3600000.0/l.availableMillis;
+            l.requiredPerAllowedHour=l.availableMillis==0?null:count*3600000.0/l.availableMillis;
             result.loads.add(l);
             // +1 leaves a slot before the boundary; it is not a frequency cap.
             interval=Math.min(interval, l.availableMillis/(double)(count+1));
