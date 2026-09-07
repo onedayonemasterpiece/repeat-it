@@ -109,7 +109,7 @@ public final class Contract {
             if(!(m.get("active") instanceof Boolean))throw new IllegalArgumentException("plan_active_must_be_boolean");
             if(!m.containsKey("deadline"))throw new IllegalArgumentException("deadline_required_explicit_null_allowed");
             p.active=Boolean.TRUE.equals(m.get("active"));
-            if(p.active&&m.get("deadline")==null)throw new IllegalArgumentException("active_plan_requires_deadline");
+            // Active + null deadline is a normal finite learning plan: finish after minimum successful «Помню» responses.
             if(m.get("deadline")!=null) {
                 p.deadline=OffsetDateTime.parse(text(m.get("deadline"),64)).toInstant();
                 if(Duration.between(Instant.now(),p.deadline).abs().toDays()>36525)throw new IllegalArgumentException("deadline_bounds");
