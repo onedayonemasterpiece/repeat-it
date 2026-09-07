@@ -64,7 +64,7 @@ public final class Store extends SQLiteOpenHelper {
         SQLiteDatabase db=getWritableDatabase();db.beginTransaction();try{put("window_start","07:40");put("window_end","23:00");db.setTransactionSuccessful();}finally{db.endTransaction();}
     }
     public synchronized void setPlans(List<Engine.Plan> plans){if(JsonParser.parseString(value("plans","[]")).equals(JsonParser.parseString(JSON.toJson(plans))))return;SQLiteDatabase db=getWritableDatabase();db.beginTransaction();try{put("plans",JSON.toJson(plans));
-        for(Engine.Card card:cards())for(Engine.Plan p:plans)if(p.deck.equals(card.deck)&&p.deadline!=null){Engine.State state=state(card,"normal");if(state.last!=null){state=Engine.retarget(state,p,window());ContentValues row=new ContentValues();row.put("k","normal:"+card.learningKey());row.put("body",JSON.toJson(state));db.insertWithOnConflict("states",null,row,SQLiteDatabase.CONFLICT_REPLACE);}}
+        for(Engine.Card card:cards())for(Engine.Plan p:plans)if(p.active&&p.deck.equals(card.deck)){Engine.State state=state(card,"normal");if(state.last!=null){state=Engine.retarget(state,p,window());ContentValues row=new ContentValues();row.put("k","normal:"+card.learningKey());row.put("body",JSON.toJson(state));db.insertWithOnConflict("states",null,row,SQLiteDatabase.CONFLICT_REPLACE);}}
         replan(now());db.setTransactionSuccessful();}finally{db.endTransaction();}}
     public synchronized List<String> importCards(Map<String,List<Engine.Card>> documents){
         List<String> errors=new ArrayList<>();Map<String,List<Engine.Card>> grouped=new TreeMap<>();Map<String,String> paths=new HashMap<>();
@@ -109,8 +109,8 @@ public final class Store extends SQLiteOpenHelper {
             Engine.State before=state(p.card,p.mode),after=before;
             boolean credited=false;
             if(p.mode.equals("normal")) {
-                Engine.Plan plan=null;for(Engine.Plan candidate:plans())if(candidate.deck.equals(p.card.deck)&&candidate.deadline!=null){plan=candidate;break;}
-                if(plan!=null){after=Engine.answer(before,plan,reaction,Instant.ofEpochMilli(p.shown),now,window());credited=after.contacts>before.contacts;}
+                Engine.Plan plan=null;for(Engine.Plan candidate:plans())if(candidate.active&&candidate.deck.equals(p.card.deck)){plan=candidate;break;}
+                if(plan!=null){after=Engine.answer(before,plan,reaction,Instant.ofEpochMilli(p.shown),now,window());credited=reaction.equals("remember")&&after.contacts>before.contacts;}
                 ContentValues state=new ContentValues();state.put("k",p.mode+":"+p.card.learningKey());state.put("body",JSON.toJson(after));db.insertWithOnConflict("states",null,state,SQLiteDatabase.CONFLICT_REPLACE);
             }else put("test_position_"+p.mode,String.valueOf(Integer.parseInt(value("test_position_"+p.mode,"0"))+1));
             db.delete("pending","pid=?",new String[]{id});replan(now);
@@ -146,7 +146,7 @@ public final class Store extends SQLiteOpenHelper {
         Map<String,Object> out=new LinkedHashMap<>();out.put("schema_version",1);out.put("device_id",device());out.put("self_report_not_memory_test",true);
         List<JsonObject> events=new ArrayList<>();try(Cursor c=getReadableDatabase().rawQuery("SELECT body FROM events WHERE mode='normal' AND verified=1 ORDER BY rowid",null)){while(c.moveToNext())events.add(JsonParser.parseString(c.getString(0)).getAsJsonObject());}
         Map<String,Map<String,Integer>> counts=new TreeMap<>();
-        for(JsonObject e:events){String key=e.get("deck_id").getAsString()+"/"+e.get("card_id").getAsString()+"@"+e.get("meaning_revision").getAsString();Map<String,Integer> m=counts.computeIfAbsent(key,k->new TreeMap<>());String r=e.get("reaction").getAsString();m.put(r,m.getOrDefault(r,0)+1);if(e.get("credited").getAsBoolean())m.put("contacts",m.getOrDefault("contacts",0)+1);}
+        for(JsonObject e:events){String key=e.get("deck_id").getAsString()+"/"+e.get("card_id").getAsString()+"@"+e.get("meaning_revision").getAsString();Map<String,Integer> m=counts.computeIfAbsent(key,k->new TreeMap<>());String r=e.get("reaction").getAsString();m.put(r,m.getOrDefault(r,0)+1);if(e.get("credited").getAsBoolean()){m.put("contacts",m.getOrDefault("contacts",0)+1);m.put("successful_remembers",m.getOrDefault("successful_remembers",0)+1);}}
         out.put("verified_response_events",events.size());out.put("cards",counts);out.put("next_plan",JSON.fromJson(value("schedule_normal","{}"),JsonObject.class));return JSON.toJson(out)+"\n";
     }
     public synchronized int eventCount(boolean verified){try(Cursor c=getReadableDatabase().rawQuery("SELECT COUNT(*) FROM events"+(verified?" WHERE verified=1":""),null)){c.moveToFirst();return c.getInt(0);}}

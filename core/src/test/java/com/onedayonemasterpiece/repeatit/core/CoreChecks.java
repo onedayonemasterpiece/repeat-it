@@ -12,6 +12,7 @@ public final class CoreChecks {
     private static final Engine.Window W=new Engine.Window(LocalTime.of(7,40),LocalTime.of(23,0),ZoneOffset.UTC);
     private static Engine.Card card(int i){Engine.Card c=new Engine.Card();c.deck="synthetic";c.id="card-"+i;c.title="Synthetic title";c.text="Synthetic public test only";return c;}
     private static Engine.Plan plan(int days){Engine.Plan p=new Engine.Plan();p.deck="synthetic";p.deadline=NOW.plus(Duration.ofDays(days));return p;}
+    private static Engine.Plan undatedPlan(){Engine.Plan p=new Engine.Plan();p.deck="synthetic";p.deadline=null;return p;}
     private static List<Engine.Card> cards(int n){List<Engine.Card>x=new ArrayList<>();for(int i=0;i<n;i++)x.add(card(i));return x;}
     private static Engine.Decision decision(int n,int days){return Engine.next(cards(n),List.of(plan(days)),Map.of(),NOW,W,List.of());}
     private static Map<String,Object> cardDoc(){Map<String,Object> c=new LinkedHashMap<>();c.put("card_id","card-0");c.put("revision",1);c.put("meaning_revision",1);c.put("mode","exposure");c.put("status","active");c.put("title","Synthetic title");c.put("text","Synthetic public test only");c.put("source_refs",List.of(Map.of("url","https://example.invalid/source")));return c;}
@@ -29,24 +30,47 @@ public final class CoreChecks {
         check(W.add(Instant.parse("2026-09-07T22:59:00Z"),120000).equals(Instant.parse("2026-09-08T07:41:00Z")),"active time skips night");
         Engine.Window local=new Engine.Window(LocalTime.of(7,40),LocalTime.of(23,0),ZoneId.of("America/New_York"));
         check(local.next(Instant.parse("2026-11-01T06:00:00Z")).equals(Instant.parse("2026-11-01T12:40:00Z")),"DST uses device zone");
+
         Engine.Plan p=plan(2);Engine.State s=new Engine.State();
         Engine.State remember=Engine.answer(s,p,"remember",NOW,NOW.plusSeconds(10),W);
         Engine.State repeat=Engine.answer(s,p,"repeat",NOW,NOW.plusSeconds(10),W);
-        check(repeat.eligible.isBefore(remember.eligible),"repeat returns earlier");
-        check(remember.contacts==1 && remember.weakDebt==0,"remember does not finish minimum");
-        check(repeat.contacts==1 && repeat.weakDebt==1,"repeat adds work");
+        check(repeat.eligible.isBefore(remember.eligible),"repeat eligibility is earlier");
+        check(remember.contacts==1 && remember.weakDebt==0,"remember advances successful mastery count");
+        check(repeat.contacts==0 && repeat.weakDebt==1,"repeat never advances mastery count");
         Engine.State rapid=Engine.answer(remember,p,"remember",NOW.plusSeconds(11),NOW.plusSeconds(12),W);
         check(rapid.contacts==1,"rapid taps cannot credit spacing");
+        Engine.Decision afterRepeat=Engine.next(cards(1),List.of(p),Map.of(card(0).learningKey(),repeat),NOW.plusSeconds(11),W,List.of());
+        Engine.Decision afterRemember=Engine.next(cards(1),List.of(p),Map.of(card(0).learningKey(),remember),NOW.plusSeconds(11),W,List.of());
+        check(afterRepeat.remaining==5,"repeat does not reduce required successful remembers");
+        check(afterRemember.remaining==4,"remember reduces required successful remembers by one");
+        check(afterRepeat.due.isBefore(afterRemember.due),"repeat actually resurfaces deadline card earlier");
+
         Engine.Card near=card(0),far=card(1);far.deck="far";Engine.Plan farP=plan(365);farP.deck="far";
         Engine.Decision mixed=Engine.next(List.of(near,far),List.of(p,farP),Map.of(),NOW,W,List.of());
         check(mixed.cardKey.equals(near.key())&&mixed.spacingMillis<=decision(1,2).spacingMillis,"far deadline cannot dilute near");
         check(mixed.loads.size()==2 && mixed.loads.get(0).cumulative==5 && mixed.loads.get(1).cumulative==10,"prefix deadline demand");
-        check(Engine.next(cards(2),List.of(),Map.of(),NOW,W,List.of()).due==null,"no invented deadline");
+        check(Engine.next(cards(2),List.of(),Map.of(),NOW,W,List.of()).due==null,"cards without active plan stay excluded");
         check(Engine.next(cards(2),List.of(p),Map.of(),p.deadline.plusSeconds(1),W,List.of()).expired==10,"expired workload explicit");
         Engine.Decision delayed=Engine.next(cards(10),List.of(p),Map.of(),NOW.plusSeconds(3600),W,List.of());
         check(delayed.spacingMillis<decision(10,2).spacingMillis,"missed time recalculates future density");
         check(decision(10,2).feasibility.startsWith("preliminary"),"no invented human capacity");
         check(Engine.next(cards(100),List.of(p),Map.of(),NOW,W,List.of(99999999L,99999999L,99999999L,99999999L,99999999L)).feasibility.startsWith("risk_from"),"empirical risk labelled separately");
+
+        Engine.Plan undated=undatedPlan();
+        Engine.Card timelessCard=card(0);
+        Engine.Decision firstUndated=Engine.next(List.of(timelessCard),List.of(undated),Map.of(),NOW,W,List.of());
+        check(firstUndated.due!=null&&firstUndated.remaining==5&&firstUndated.expired==0,"active undated plan schedules finite learning");
+        Engine.State timelessState=new Engine.State();Instant timelessNow=firstUndated.due;
+        for(int success=1;success<=5;success++) {
+            timelessState=Engine.answer(timelessState,undated,"remember",timelessNow,timelessNow.plusSeconds(1),W);
+            check(timelessState.contacts==success,"undated remember increments success exactly once");
+            Engine.Decision next=Engine.next(List.of(timelessCard),List.of(undated),Map.of(timelessCard.learningKey(),timelessState),timelessNow.plusSeconds(1),W,List.of());
+            if(success<5){check(next.due!=null&&next.remaining==5-success,"undated card remains until required successes");timelessNow=next.due;}
+            else check(next.due==null&&next.remaining==0,"undated card retires after fifth successful remember");
+        }
+        Engine.State undatedRepeat=Engine.answer(new Engine.State(),undated,"repeat",NOW,NOW.plusSeconds(1),W);
+        check(undatedRepeat.contacts==0&&undatedRepeat.eligible.isAfter(NOW),"undated repeat returns sooner without success credit");
+
         Map<String,Object> doc=document();check(Contract.deck(doc).cards.size()==1,"canonical deck imports");
         Map<String,Object> empty=document();empty.put("cards",List.of());rejects(()->Contract.deck(empty),"empty logical deck rejected");
         ((Map<String,Object>)((List<?>)doc.get("cards")).get(0)).put("revision","2");check(Contract.deck(doc).cards.get(0).revision==2,"numeric-string safe recovery");
@@ -63,12 +87,14 @@ public final class CoreChecks {
         Engine.Plan nightPlan=plan(2);nightPlan.deadline=Instant.parse("2026-09-08T02:00:00Z");
         Engine.Decision noWindow=Engine.next(cards(1),List.of(nightPlan),Map.of(),Instant.parse("2026-09-07T23:30:00Z"),W,List.of());
         check(noWindow.due==null&&noWindow.loads.get(0).requiredPerAllowedHour==null,"no window is JSON-safe, not Infinity");
-        Map<String,Object> badActive=new LinkedHashMap<>();badActive.put("deck_id","synthetic");badActive.put("minimum_contacts",5);badActive.put("active","true");badActive.put("deadline","2026-09-09T20:00:00Z");
-        rejects(()->Contract.plans(Map.of("schema_version",1,"plans",List.of(badActive))),"corrupt active flag cannot silently disable plan");
-        badActive.put("active",true);badActive.put("deadline",null);
-        rejects(()->Contract.plans(Map.of("schema_version",1,"plans",List.of(badActive))),"active plan cannot invent missing deadline");
-        badActive.put("active",false);check(Contract.plans(Map.of("schema_version",1,"plans",List.of(badActive))).size()==1,"inactive null deadline is valid");
+        Map<String,Object> planDoc=new LinkedHashMap<>();planDoc.put("deck_id","synthetic");planDoc.put("minimum_contacts",5);planDoc.put("active","true");planDoc.put("deadline","2026-09-09T20:00:00Z");
+        rejects(()->Contract.plans(Map.of("schema_version",1,"plans",List.of(planDoc))),"corrupt active flag cannot silently enable plan");
+        planDoc.put("active",true);planDoc.put("deadline",null);
+        List<Engine.Plan> parsedUndated=Contract.plans(Map.of("schema_version",1,"plans",List.of(planDoc)));
+        check(parsedUndated.size()==1&&parsedUndated.get(0).active&&parsedUndated.get(0).deadline==null,"active null deadline is valid finite plan");
+        planDoc.put("active",false);check(Contract.plans(Map.of("schema_version",1,"plans",List.of(planDoc))).size()==1,"inactive null deadline is valid");
         Map<String,Object> noStatus=document();((Map<String,Object>)((List<?>)noStatus.get("cards")).get(0)).remove("status");Contract.Import noStatusImport=Contract.deck(noStatus);check(noStatusImport.cards.isEmpty()&&!noStatusImport.issues.isEmpty(),"missing v3 status quarantines card instead of activating it");
+
         List<Engine.Card> all=cards(40);Map<String,Engine.State> history=new HashMap<>();Instant now=NOW;int answered=0;
         for(int iteration=0;iteration<300;iteration++) {
             Engine.Decision d=Engine.next(all,List.of(p),history,now,W,List.of());
@@ -78,8 +104,8 @@ public final class CoreChecks {
             Engine.State old=history.getOrDefault(selected.learningKey(),new Engine.State());
             now=d.due.plusSeconds(1);history.put(selected.learningKey(),Engine.answer(old,p,"remember",d.due,now,W));answered++;
         }
-        check(answered==200,"forty cards receive all five spaced contacts by deadline");
-        for(Engine.Card c:all)check(history.get(c.learningKey()).contacts==5,"no starvation");
+        check(answered==200,"forty cards receive all five successful spaced remembers by deadline");
+        for(Engine.Card c:all)check(history.get(c.learningKey()).contacts==5,"no starvation and finite completion");
         System.out.println("PASS "+checks+" assertions; synthetic fixtures only");
     }
 }
