@@ -172,8 +172,8 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           if [ "$release_kind" = debug ]; then
-            NOTES='Hosted build, Android 15 transaction test and 40-cycle native overlay stress passed. Normal mode has an adaptive 15-to-5-minute attention floor between completed contacts; one pending card still blocks every other card. Agent debug is explicit-step only, test mode is visible/escapable in the owner UI, cards are screenshotable, and the PAT entry dialog remains protected. This APK uses a temporary build debug signature.'
+            NOTES='Hosted build, Android 15 transaction test and 40-cycle native overlay stress passed. Normal mode has an adaptive 15-to-10-minute attention floor between completed contacts; one pending card still blocks every other card. Agent debug is explicit-step only, test mode is visible/escapable in the owner UI, cards are screenshotable, and the PAT entry dialog remains protected. This APK uses a temporary build debug signature.'
           else
-            NOTES='Hosted build, Android 15 transaction test and 40-cycle native overlay stress passed. Normal mode has an adaptive 15-to-5-minute attention floor between completed contacts; one pending card still blocks every other card. Agent debug is explicit-step only, test mode is visible/escapable in the owner UI, cards are screenshotable, and the PAT entry dialog remains protected. APK uses the configured permanent signing identity.'
+            NOTES='Hosted build, Android 15 transaction test and 40-cycle native overlay stress passed. Normal mode has an adaptive 15-to-10-minute attention floor between completed contacts; one pending card still blocks every other card. Agent debug is explicit-step only, test mode is visible/escapable in the owner UI, cards are screenshotable, and the PAT entry dialog remains protected. APK uses the configured permanent signing identity.'
           fi
           gh release create "$release_tag" release/* --target "$GITHUB_SHA" --title "Повторение 0.1.$GITHUB_RUN_NUMBER ($release_kind)" --notes "$NOTES"
