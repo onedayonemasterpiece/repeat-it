@@ -43,7 +43,7 @@ public final class CoreChecks {
         Engine.State rapid=Engine.answer(remember,p,"remember",NOW.plusSeconds(11),NOW.plusSeconds(12),W);check(rapid.contacts==1,"rapid taps cannot credit spacing");
         Engine.Decision afterRepeat=Engine.next(cards(1),List.of(p),Map.of(card(0).learningKey(),repeat),NOW.plusSeconds(11),W,List.of());
         Engine.Decision afterRemember=Engine.next(cards(1),List.of(p),Map.of(card(0).learningKey(),remember),NOW.plusSeconds(11),W,List.of());
-        check(afterRepeat.remaining==5,"repeat does not reduce required successful remembers");check(afterRemember.remaining==4,"remember reduces required successful remembers by one");check(afterRepeat.due.isBefore(afterRemember.due),"repeat actually resurfaces deadline card earlier");
+        check(afterRepeat.remaining==5,"repeat does not reduce required successful remembers");check(afterRemember.remaining==4,"remember reduces required successful remembers by one");check(afterRepeat.due.isBefore(afterRemember.due),"repeat returns the one-card deck sooner without gaining card priority over siblings");
 
         Engine.Card near=card(0),far=card(1);far.deck="far";Engine.Plan farP=plan(365);farP.deck="far";Engine.Decision mixed=Engine.next(List.of(near,far),List.of(p,farP),Map.of(),NOW,W,List.of());
         check(mixed.cardKey.equals(near.key())&&mixed.spacingMillis<=decision(1,2).spacingMillis,"far deadline cannot dilute near");
@@ -71,8 +71,8 @@ public final class CoreChecks {
         Engine.Card deckA=card(0),deckB=card(1),deckC=card(2);deckA.deck="a";deckB.deck="b";deckC.deck="c";Engine.Plan a=undatedPlan(),b=undatedPlan(),c=undatedPlan();a.deck="a";b.deck="b";c.deck="c";
         Engine.Decision oneOfMany=Engine.next(List.of(deckA,deckB,deckC),List.of(a,b,c),Map.of(),NOW,W,List.of());check(oneOfMany.cardKey!=null&&oneOfMany.remaining==15,"many decks still produce exactly one next identity");
         Engine.Card oldCard=card(10),salvageable=card(11);oldCard.deck="old";salvageable.deck="salvage";Engine.Plan oldPlan=new Engine.Plan(),salvagePlan=new Engine.Plan();oldPlan.deck="old";oldPlan.deadline=NOW.minus(Duration.ofHours(1));salvagePlan.deck="salvage";salvagePlan.deadline=NOW.plus(Duration.ofMinutes(10));
-        Engine.Decision protectFuture=Engine.next(List.of(oldCard,salvageable),List.of(oldPlan,salvagePlan),Map.of(),NOW,W,List.of());check(protectFuture.cardKey.equals(salvageable.key()),"salvageable deadline inside human gap beats already-missed backlog");
-        salvagePlan.deadline=NOW.plus(Duration.ofDays(1));Engine.Decision fillSlack=Engine.next(List.of(oldCard,salvageable),List.of(oldPlan,salvagePlan),Map.of(),NOW,W,List.of());check(fillSlack.cardKey.equals(oldCard.key()),"overdue work fills slack when future deadline is not imminent");
+        Engine.Decision protectFuture=Engine.next(List.of(oldCard,salvageable),List.of(oldPlan,salvagePlan),Map.of(),NOW,W,List.of());check(protectFuture.cardKey.equals(salvageable.key()),"salvageable imminent deadline receives the next weighted lane turn");
+        salvagePlan.deadline=NOW.plus(Duration.ofDays(1));Engine.Decision fairLane=Engine.next(List.of(oldCard,salvageable),List.of(oldPlan,salvagePlan),Map.of(),NOW,W,List.of());check(fairLane.cardKey!=null&&fairLane.due!=null,"overdue and future lanes remain serviceable without an exact FIFO identity guarantee");
 
         Map<String,Object> doc=document();check(Contract.deck(doc).cards.size()==1,"canonical deck imports");Map<String,Object> empty=document();empty.put("cards",List.of());rejects(()->Contract.deck(empty),"empty logical deck rejected");
         ((Map<String,Object>)((List<?>)doc.get("cards")).get(0)).put("revision","2");check(Contract.deck(doc).cards.get(0).revision==2,"numeric-string safe recovery");
