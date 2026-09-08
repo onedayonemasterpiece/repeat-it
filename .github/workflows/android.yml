@@ -98,6 +98,7 @@ jobs:
             grep -q '^finite_session=1$' overlay-stress-summary.txt
             grep -q '^stateful_pause_control=1$' overlay-stress-summary.txt
             grep -q '^auto_active_without_enable=1$' overlay-stress-summary.txt
+            grep -q '^primary_controls_visible_without_scroll=1$' overlay-stress-summary.txt
       - uses: actions/upload-artifact@v4
         if: always()
         with:
