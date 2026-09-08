@@ -55,10 +55,12 @@ public final class OverlayService extends Service {
     private void cancelContent(){String tag=store.value("notification_tag","");if(!tag.isEmpty())getSystemService(NotificationManager.class).cancel(tag,2);}
     private void hide(){if(panel!=null){try{wm.removeView(panel);}catch(IllegalArgumentException ignored){}panel=null;visibleId="";}rememberX=rememberY=repeatX=repeatY=0;if(store!=null)store.put("overlay_visible","false");}
     private boolean previewAllowed(Store.Pending p){if(!p.card.preview)return false;for(Engine.Card c:store.cards())if(c.key().equals(p.card.key()))return c.preview&&c.active;return false;}
+    private String sourceText(Engine.Card card,String key){if(card.source==null)return "";Object value=card.source.get(key);return value instanceof String?((String)value).trim():"";}
+    private String presentation(Engine.Card card){String value=sourceText(card,"presentation");return value.isEmpty()?"thesis":value;}
     private void content(Store.Pending p,boolean signal){
         if(!active())return;if(locked()&&!previewAllowed(p)){cancelContent();return;}NotificationManager manager=getSystemService(NotificationManager.class);if(!manager.areNotificationsEnabled())return;
         AudioManager audio=getSystemService(AudioManager.class);signal=signal&&!locked()&&audio.getRingerMode()==AudioManager.RINGER_MODE_NORMAL&&manager.getCurrentInterruptionFilter()==NotificationManager.INTERRUPTION_FILTER_ALL;
-        String old=store.value("notification_tag","");if(!old.equals(p.id))cancelContent();Notification.Builder b=new Notification.Builder(this,signal?SOUND:SILENT).setSmallIcon(R.drawable.ic_repeat).setContentTitle(p.card.title).setContentText(p.card.text).setStyle(new Notification.BigTextStyle().bigText(p.card.text)).setContentIntent(open()).setOnlyAlertOnce(true).setVisibility(Notification.VISIBILITY_PRIVATE).setOngoing(true);manager.notify(p.id,2,b.build());store.put("notification_tag",p.id);
+        String old=store.value("notification_tag","");if(!old.equals(p.id))cancelContent();String metric=presentation(p.card).equals("metric")?sourceText(p.card,"metric"):"";String fallback=(metric.isEmpty()?"":metric+" · ")+p.card.text;Notification.Builder b=new Notification.Builder(this,signal?SOUND:SILENT).setSmallIcon(R.drawable.ic_repeat).setContentTitle(p.card.title).setContentText(fallback).setStyle(new Notification.BigTextStyle().bigText(fallback)).setContentIntent(open()).setOnlyAlertOnce(true).setVisibility(Notification.VISIBILITY_PRIVATE).setOngoing(true);manager.notify(p.id,2,b.build());store.put("notification_tag",p.id);
     }
 
     private int dp(int value){return Math.round(value*getResources().getDisplayMetrics().density);}
@@ -77,6 +79,17 @@ public final class OverlayService extends Service {
         }
     }
     private int bodySize(String text){int n=text==null?0:text.length();if(n>360)return 23;if(n>260)return 25;if(n>180)return 27;if(n>110)return 30;return 33;}
+    private int metricSize(String metric){int n=metric==null?0:metric.length();if(n<=4)return 96;if(n<=8)return 84;if(n<=12)return 72;return 60;}
+    private void addDetail(LinearLayout panel,Engine.Card card){String detail=sourceText(card,"detail");if(detail.isEmpty())return;TextView note=label(detail,16,MUTED,editorial);note.setLineSpacing(dp(2),1.08f);note.setPadding(0,dp(18),0,0);panel.addView(note);}
+    private void addImage(LinearLayout panel,Engine.Card card,boolean hero){
+        if(card.image.isEmpty()){
+            if(hero){TextView missing=label(card.alt.isEmpty()?"Изображение пока недоступно офлайн":card.alt+" · изображение пока недоступно офлайн",14,MUTED,body);missing.setPadding(0,dp(16),0,0);panel.addView(missing);}return;
+        }
+        File image=GitHubSync.imageFile(this,card.imageHash);if(!image.exists()){if(hero){TextView missing=label(card.alt+" · изображение пока недоступно офлайн",14,MUTED,body);missing.setPadding(0,dp(16),0,0);panel.addView(missing);}return;}
+        BitmapFactory.Options options=new BitmapFactory.Options();options.inJustDecodeBounds=true;BitmapFactory.decodeFile(image.getPath(),options);int sample=1;while(Math.max(options.outWidth,options.outHeight)/sample>1600)sample*=2;options.inSampleSize=sample;options.inJustDecodeBounds=false;Bitmap bitmap=BitmapFactory.decodeFile(image.getPath(),options);if(bitmap==null)return;
+        ImageView iv=new ImageView(this);iv.setImageBitmap(bitmap);iv.setContentDescription(card.alt);iv.setBackground(shape(PAPER,20,0,0));iv.setClipToOutline(true);LinearLayout.LayoutParams ip;if(hero){iv.setScaleType(ImageView.ScaleType.CENTER_CROP);ip=new LinearLayout.LayoutParams(-1,dp(285));}else{iv.setAdjustViewBounds(true);iv.setScaleType(ImageView.ScaleType.CENTER_CROP);ip=new LinearLayout.LayoutParams(-1,-2);}ip.setMargins(0,dp(18),0,0);panel.addView(iv,ip);
+        if(!card.caption.isEmpty()){TextView caption=label(card.caption,14,MUTED,editorial);caption.setPadding(0,dp(9),0,0);panel.addView(caption);}
+    }
 
     private void show(Store.Pending p){
         if(panel!=null&&visibleId.equals(p.id))return;if(locked()||!active()||!Settings.canDrawOverlays(this))return;hide();
@@ -93,13 +106,16 @@ public final class OverlayService extends Service {
         ScrollView scroll=new ScrollView(this);scroll.setFillViewport(false);scroll.setVerticalScrollBarEnabled(false);
         LinearLayout bodyPanel=new LinearLayout(this);bodyPanel.setOrientation(LinearLayout.VERTICAL);bodyPanel.setPadding(dp(18),dp(18),dp(18),dp(20));bodyPanel.setBackground(shape(0xff333632,24,0,0));
         TextView title=label(p.card.title,17,ORANGE,display);title.setLetterSpacing(.02f);title.setLineSpacing(0,1.05f);bodyPanel.addView(title);
-        TextView thesis=label(p.card.text,bodySize(p.card.text),PAPER,display);thesis.setLetterSpacing(-.012f);thesis.setLineSpacing(dp(2),1.05f);thesis.setPadding(0,dp(12),0,0);if(Build.VERSION.SDK_INT>=23)thesis.setHyphenationFrequency(android.text.Layout.HYPHENATION_FREQUENCY_NONE);bodyPanel.addView(thesis);
 
-        if(!p.card.image.isEmpty()){
-            File image=GitHubSync.imageFile(this,p.card.imageHash);if(image.exists()){BitmapFactory.Options options=new BitmapFactory.Options();options.inJustDecodeBounds=true;BitmapFactory.decodeFile(image.getPath(),options);int sample=1;while(Math.max(options.outWidth,options.outHeight)/sample>1600)sample*=2;options.inSampleSize=sample;options.inJustDecodeBounds=false;Bitmap bitmap=BitmapFactory.decodeFile(image.getPath(),options);if(bitmap!=null){ImageView iv=new ImageView(this);iv.setAdjustViewBounds(true);iv.setScaleType(ImageView.ScaleType.CENTER_CROP);iv.setImageBitmap(bitmap);iv.setContentDescription(p.card.alt);iv.setBackground(shape(PAPER,20,0,0));iv.setClipToOutline(true);LinearLayout.LayoutParams ip=new LinearLayout.LayoutParams(-1,-2);ip.setMargins(0,dp(18),0,0);bodyPanel.addView(iv,ip);}}
-            else{TextView missing=label(p.card.alt+" · изображение пока недоступно офлайн",14,MUTED,body);missing.setPadding(0,dp(14),0,0);bodyPanel.addView(missing);}if(!p.card.caption.isEmpty()){TextView caption=label(p.card.caption,14,MUTED,editorial);caption.setPadding(0,dp(9),0,0);bodyPanel.addView(caption);}
+        String type=presentation(p.card);
+        if(type.equals("metric")){
+            String metric=sourceText(p.card,"metric");TextView number=label(metric,metricSize(metric),PAPER,display);number.setLetterSpacing(-.025f);number.setPadding(0,dp(14),0,0);bodyPanel.addView(number);
+            TextView thesis=label(p.card.text,Math.min(28,bodySize(p.card.text)),PAPER,display);thesis.setLetterSpacing(-.01f);thesis.setLineSpacing(dp(2),1.05f);thesis.setPadding(0,dp(8),0,0);bodyPanel.addView(thesis);addDetail(bodyPanel,p.card);
+        }else if(type.equals("image")){
+            addImage(bodyPanel,p.card,true);TextView thesis=label(p.card.text,Math.min(27,bodySize(p.card.text)),PAPER,display);thesis.setLetterSpacing(-.01f);thesis.setLineSpacing(dp(2),1.05f);thesis.setPadding(0,dp(16),0,0);bodyPanel.addView(thesis);addDetail(bodyPanel,p.card);
+        }else{
+            TextView thesis=label(p.card.text,bodySize(p.card.text),PAPER,display);thesis.setLetterSpacing(-.012f);thesis.setLineSpacing(dp(2),1.05f);thesis.setPadding(0,dp(12),0,0);if(Build.VERSION.SDK_INT>=23)thesis.setHyphenationFrequency(android.text.Layout.HYPHENATION_FREQUENCY_NONE);bodyPanel.addView(thesis);addImage(bodyPanel,p.card,false);addDetail(bodyPanel,p.card);
         }
-        TextView note=label("касание с информацией уже считается · ответ нужен только для следующего шага",15,MUTED,editorial);note.setPadding(0,dp(18),0,0);bodyPanel.addView(note);
         scroll.addView(bodyPanel);root.addView(scroll,new LinearLayout.LayoutParams(-1,0,1));
 
         LinearLayout reactions=new LinearLayout(this);reactions.setOrientation(LinearLayout.HORIZONTAL);reactions.setPadding(0,dp(14),0,0);

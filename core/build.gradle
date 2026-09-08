@@ -6,4 +6,10 @@ tasks.register('coreChecks', JavaExec) {
     mainClass = 'com.onedayonemasterpiece.repeatit.core.CoreChecks'
     enableAssertions = true
 }
-check.dependsOn coreChecks
+tasks.register('presentationChecks', JavaExec) {
+    dependsOn testClasses
+    classpath = sourceSets.test.runtimeClasspath
+    mainClass = 'com.onedayonemasterpiece.repeatit.core.PresentationChecks'
+    enableAssertions = true
+}
+check.dependsOn coreChecks, presentationChecks
