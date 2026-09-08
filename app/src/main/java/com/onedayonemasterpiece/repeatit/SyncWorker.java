@@ -20,12 +20,17 @@ public final class SyncWorker extends Worker {
         }
     }
     private void changed(){getApplicationContext().sendBroadcast(new android.content.Intent(Delivery.CHANGED).setPackage(getApplicationContext().getPackageName()));}
+    private void phaseFailure(Store store,String message){
+        if("running".equals(store.value("library_sync_state",""))){store.put("library_sync_state","error");store.put("library_sync_error",message);}
+        else if("running".equals(store.value("progress_sync_state",""))){store.put("progress_sync_state","error");store.put("progress_sync_error",message);}
+        store.put("sync_error",message);
+    }
     @NonNull @Override public Result doWork(){
         synchronized(SYNC_LOCK){Store store=Store.get(getApplicationContext());try{
-            String token=new TokenVault(getApplicationContext()).read();if(token.isEmpty()){store.put("sync_error","PAT не настроен; локальные данные сохранены");return Result.failure();}
+            String token=new TokenVault(getApplicationContext()).read();if(token.isEmpty()){String message="PAT не настроен; локальные данные сохранены";store.put("library_sync_state","error");store.put("library_sync_error",message);store.put("sync_error",message);return Result.failure();}
             new GitHubSync(getApplicationContext(),token).run();Delivery.arm(getApplicationContext());return Result.success();
-        }catch(GitHubSync.RemoteError e){store.put("sync_error",e.getMessage());if(e.status==401||e.status==403)return Result.failure();return getRunAttemptCount()<5?Result.retry():Result.failure();
-        }catch(Exception e){store.put("sync_error","sync_failed:"+e.getClass().getSimpleName());return getRunAttemptCount()<5?Result.retry():Result.failure();
+        }catch(GitHubSync.RemoteError e){phaseFailure(store,e.getMessage());if(e.status==401||e.status==403)return Result.failure();return getRunAttemptCount()<5?Result.retry():Result.failure();
+        }catch(Exception e){String message="sync_failed:"+e.getClass().getSimpleName();phaseFailure(store,message);return getRunAttemptCount()<5?Result.retry():Result.failure();
         }finally{changed();}}
     }
 }
