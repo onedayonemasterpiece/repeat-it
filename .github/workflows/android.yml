@@ -119,6 +119,8 @@ jobs:
             grep -q '^test_mode_indicator=1$' overlay-stress-summary.txt
             grep -q '^agent_debug_manual_step=1$' overlay-stress-summary.txt
             grep -q '^screenshot_shareable=1$' overlay-stress-summary.txt
+            grep -q '^arrival_touch_guard=1$' overlay-stress-summary.txt
+            grep -Eq '^touch_guard_blocked=[1-9][0-9]*$' overlay-stress-summary.txt
             test -s shareable-overlay.png
       - uses: actions/upload-artifact@v4
         if: always()
@@ -191,8 +193,8 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           if [ "$release_kind" = debug ]; then
-            NOTES='Hosted build, Android 15 exact-alarm recovery check, locked-due preattach regression, transaction test and 40-cycle native overlay stress passed. A due overlay is pre-attached while the phone sleeps without counting as shown; after unlock the same pending becomes the one visible card. A bounded non-wakeup recovery watchdog remains as process/OEM freeze insurance. Normal pacing remains 15-to-10 minutes and one pending blocks all other cards. This APK uses a temporary build debug signature.'
+            NOTES='Hosted build, Android 15 exact-alarm recovery check, locked-due preattach regression, transaction test and 40-cycle native overlay stress passed. A due overlay is pre-attached while the phone sleeps without counting as shown; after unlock the same pending becomes the one visible card. A bounded non-wakeup recovery watchdog remains as process/OEM freeze insurance. Every newly visible overlay has a 2-second touch guard that absorbs arrival taps before any card control can act. Normal pacing remains 15-to-10 minutes and one pending blocks all other cards. This APK uses a temporary build debug signature.'
           else
-            NOTES='Hosted build, Android 15 exact-alarm recovery check, locked-due preattach regression, transaction test and 40-cycle native overlay stress passed. A due overlay is pre-attached while the phone sleeps without counting as shown; after unlock the same pending becomes the one visible card. A bounded non-wakeup recovery watchdog remains as process/OEM freeze insurance. Normal pacing remains 15-to-10 minutes and one pending blocks all other cards. APK uses the configured permanent signing identity.'
+            NOTES='Hosted build, Android 15 exact-alarm recovery check, locked-due preattach regression, transaction test and 40-cycle native overlay stress passed. A due overlay is pre-attached while the phone sleeps without counting as shown; after unlock the same pending becomes the one visible card. A bounded non-wakeup recovery watchdog remains as process/OEM freeze insurance. Every newly visible overlay has a 2-second touch guard that absorbs arrival taps before any card control can act. Normal pacing remains 15-to-10 minutes and one pending blocks all other cards. APK uses the configured permanent signing identity.'
           fi
           gh release create "$release_tag" release/* --target "$GITHUB_SHA" --title "Повторение 0.1.$GITHUB_RUN_NUMBER ($release_kind)" --notes "$NOTES"
