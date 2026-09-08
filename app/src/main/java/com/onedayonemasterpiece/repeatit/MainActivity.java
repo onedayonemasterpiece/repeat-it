@@ -150,7 +150,7 @@ public final class MainActivity extends Activity {
         String libraryError=store.value("library_sync_error","");if(!libraryError.isEmpty())s.append("Library detail: ").append(libraryError).append("\n");
         s.append("Progress state: ").append(store.value("progress_sync_state","legacy")).append("\nLast progress sync: ").append(store.value("last_progress_sync","ещё нет")).append("\n");String progressError=store.value("progress_sync_error","");if(!progressError.isEmpty())s.append("Progress detail: ").append(progressError).append("\n");
         String delivery=store.value("delivery_error","");if(!delivery.isEmpty())s.append("Delivery error: ").append(delivery).append("\n");
-        s.append("Normal: новые показы 07:40–00:30 · ").append(java.time.ZoneId.systemDefault()).append(". Между завершёнными normal-контактами обычно ≥15 мин; при дедлайновой нагрузке адаптивно, но никогда <5 мин. Уже показанная карточка ждёт ответа и ночью.");return s.toString();
+        s.append("Normal: новые показы 07:40–00:30 · ").append(java.time.ZoneId.systemDefault()).append(". Между завершёнными normal-контактами обычно ≥15 мин; при дедлайновой нагрузке адаптивно, но никогда <10 мин. Уже показанная карточка ждёт ответа и ночью.");return s.toString();
     }
 
     private void showDiagnostics(){TextView copy=label(diagnosticText(),14,INK,body);copy.setPadding(dp(20),dp(6),dp(20),dp(8));copy.setTextIsSelectable(true);new AlertDialog.Builder(this).setTitle("Техническое состояние").setView(copy).setPositiveButton("Закрыть",null).show();}
