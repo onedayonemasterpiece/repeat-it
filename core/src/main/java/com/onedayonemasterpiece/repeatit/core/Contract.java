@@ -77,8 +77,13 @@ public final class Contract {
         String presentation=m.containsKey("presentation")?text(m.get("presentation"),32):"thesis";
         if(!Set.of("thesis","metric","image").contains(presentation))throw new IllegalArgumentException("invalid_presentation");
         if(presentation.equals("metric")){
-            if(!m.containsKey("metric"))throw new IllegalArgumentException("metric_required");
-            text(m.get("metric"),64);
+            if(!m.containsKey("metric")||m.get("metric")==null)throw new IllegalArgumentException("metric_required");
+            Object rawMetric=m.get("metric");
+            if(rawMetric instanceof String)text(rawMetric,64); // temporary backward compatibility with v0.1.48-authored data
+            else{
+                Map<String,Object> metric=object(rawMetric);text(metric.get("value"),64);
+                if(metric.containsKey("unit")&&metric.get("unit")!=null)text(metric.get("unit"),32);
+            }
         }else if(m.containsKey("metric")&&m.get("metric")!=null)throw new IllegalArgumentException("metric_without_metric_presentation");
         if(presentation.equals("image")&&m.get("image")==null)throw new IllegalArgumentException("image_required");
         if(version==3&&!m.containsKey("status"))throw new IllegalArgumentException("status_required");
