@@ -93,7 +93,7 @@ public final class OverlayService extends Service {
         ScrollView scroll=new ScrollView(this);scroll.setFillViewport(false);scroll.setVerticalScrollBarEnabled(false);
         LinearLayout bodyPanel=new LinearLayout(this);bodyPanel.setOrientation(LinearLayout.VERTICAL);bodyPanel.setPadding(dp(18),dp(18),dp(18),dp(20));bodyPanel.setBackground(shape(0xff333632,24,0,0));
         TextView title=label(p.card.title,17,ORANGE,display);title.setLetterSpacing(.02f);title.setLineSpacing(0,1.05f);bodyPanel.addView(title);
-        TextView thesis=label(p.card.text,bodySize(p.card.text),PAPER,display);thesis.setLetterSpacing(-.012f);thesis.setLineSpacing(dp(2),1.05f);thesis.setPadding(0,dp(12),0,0);if(Build.VERSION.SDK_INT>=23){thesis.setBreakStrategy(android.text.Layout.BREAK_STRATEGY_HIGH_QUALITY);thesis.setHyphenationFrequency(android.text.Layout.HYPHENATION_FREQUENCY_NONE);}bodyPanel.addView(thesis);
+        TextView thesis=label(p.card.text,bodySize(p.card.text),PAPER,display);thesis.setLetterSpacing(-.012f);thesis.setLineSpacing(dp(2),1.05f);thesis.setPadding(0,dp(12),0,0);if(Build.VERSION.SDK_INT>=23)thesis.setHyphenationFrequency(android.text.Layout.HYPHENATION_FREQUENCY_NONE);bodyPanel.addView(thesis);
 
         if(!p.card.image.isEmpty()){
             File image=GitHubSync.imageFile(this,p.card.imageHash);if(image.exists()){BitmapFactory.Options options=new BitmapFactory.Options();options.inJustDecodeBounds=true;BitmapFactory.decodeFile(image.getPath(),options);int sample=1;while(Math.max(options.outWidth,options.outHeight)/sample>1600)sample*=2;options.inSampleSize=sample;options.inJustDecodeBounds=false;Bitmap bitmap=BitmapFactory.decodeFile(image.getPath(),options);if(bitmap!=null){ImageView iv=new ImageView(this);iv.setAdjustViewBounds(true);iv.setScaleType(ImageView.ScaleType.CENTER_CROP);iv.setImageBitmap(bitmap);iv.setContentDescription(p.card.alt);iv.setBackground(shape(PAPER,20,0,0));iv.setClipToOutline(true);LinearLayout.LayoutParams ip=new LinearLayout.LayoutParams(-1,-2);ip.setMargins(0,dp(18),0,0);bodyPanel.addView(iv,ip);}}
@@ -103,7 +103,7 @@ public final class OverlayService extends Service {
         scroll.addView(bodyPanel);root.addView(scroll,new LinearLayout.LayoutParams(-1,0,1));
 
         LinearLayout reactions=new LinearLayout(this);reactions.setOrientation(LinearLayout.HORIZONTAL);reactions.setPadding(0,dp(14),0,0);
-        TextView repeat=action("Повторить",GRAPHITE, PAPER,0xff71766f,1);repeat.setContentDescription("repeat-it-repeat");repeat.setOnClickListener(v->react(p,"repeat",repeat));
+        TextView repeat=action("Повторить",GRAPHITE,PAPER,0xff71766f,1);repeat.setContentDescription("repeat-it-repeat");repeat.setOnClickListener(v->react(p,"repeat",repeat));
         TextView remember=action("Помню  →",ORANGE,WHITE,ORANGE,0);remember.setContentDescription("repeat-it-remember");remember.setOnClickListener(v->react(p,"remember",remember));
         reactions.addView(repeat,new LinearLayout.LayoutParams(0,dp(66),1));LinearLayout.LayoutParams rp=new LinearLayout.LayoutParams(0,dp(66),1);rp.setMargins(dp(9),0,0,0);reactions.addView(remember,rp);root.addView(reactions);
 
