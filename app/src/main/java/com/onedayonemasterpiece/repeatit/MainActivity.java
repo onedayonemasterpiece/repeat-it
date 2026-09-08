@@ -15,7 +15,7 @@ import android.view.*;
 import android.widget.*;
 import androidx.core.content.ContextCompat;
 import com.onedayonemasterpiece.repeatit.core.Engine;
-import java.time.Instant;
+import java.time.*;
 
 public final class MainActivity extends Activity {
     public static volatile boolean visible=false;
@@ -124,7 +124,7 @@ public final class MainActivity extends Activity {
     }
 
     private void showPermissions(){
-        new AlertDialog.Builder(this).setTitle("Разрешения Android").setItems(new String[]{"Поверх других приложений","Уведомления","Точный ближайший сигнал"},(dialog,index)->{
+        new AlertDialog.Builder(this).setTitle("Разрешения Android").setItems(new String[]{"Поверх других приложений","Уведомления","Надёжный точный сигнал"},(dialog,index)->{
             store.put("last_ui_action","permissions_"+index+"@"+Instant.now());
             if(index==0)startActivity(new Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION,Uri.parse("package:"+getPackageName())));
             if(index==1&&Build.VERSION.SDK_INT>=33)requestPermissions(new String[]{Manifest.permission.POST_NOTIFICATIONS},71);
@@ -132,19 +132,22 @@ public final class MainActivity extends Activity {
         }).show();
     }
 
+    private boolean exactAlarmReady(){if(Build.VERSION.SDK_INT<31)return true;return getSystemService(AlarmManager.class).canScheduleExactAlarms();}
     private String nextLabel(Engine.Decision d){return d.due==null?"пока не назначен":d.due.atZone(java.time.ZoneId.systemDefault()).toLocalDateTime().toString().replace('T',' ');}
     private String syncLabel(){
         String state=store.value("library_sync_state","");
         if(state.equals("running"))return "ОБНОВЛЯЕМ";if(state.equals("warning"))return "ПРЕДУПРЕЖДЕНИЕ";if(state.equals("error"))return "ОШИБКА";if(state.equals("ok"))return "АКТУАЛЬНО";
         String err=store.value("sync_error","");String last=store.value("last_sync","");if(!err.isEmpty()&&last.isEmpty())return "ОШИБКА";if(!err.isEmpty())return "ПРЕДУПРЕЖДЕНИЕ";if(last.isEmpty())return "ЕЩЁ НЕ БЫЛО";return "АКТУАЛЬНО";
     }
-    private String setupStatus(){String overlay=Settings.canDrawOverlays(this)?"overlay разрешён":"нужен overlay";String sync=store.value("last_library_sync",store.value("last_sync","")).isEmpty()?"GitHub ещё не синхронизирован":"GitHub синхронизирован";return sync+" · "+overlay+".";}
+    private String setupStatus(){String overlay=Settings.canDrawOverlays(this)?"overlay разрешён":"нужен overlay";String sync=store.value("last_library_sync",store.value("last_sync","")).isEmpty()?"GitHub ещё не синхронизирован":"GitHub синхронизирован";String alarm=exactAlarmReady()?"recovery-сигнал разрешён":"нужен точный recovery-сигнал";return sync+" · "+overlay+" · "+alarm+".";}
 
     private String diagnosticText(){
-        Engine.Decision d=store.decision();Store.Pending p=store.pending();StringBuilder s=new StringBuilder();
+        Engine.Decision d=store.decision();Store.Pending p=store.pending();StringBuilder s=new StringBuilder();Instant now=Instant.now();
+        long pendingWait=p==null?0:Math.max(0,now.toEpochMilli()-p.created),scheduledLate=d.due==null?0:Math.max(0,Duration.between(d.due,now).toMillis());
         s.append("Режим: ").append(store.mode()).append("\nПауза: ").append(store.value("paused","false")).append("\n");
-        s.append("Карточек: ").append(store.cards().size()).append("\nPending: ").append(p==null?"нет":p.id).append("\nOverlay visible: ").append(store.value("overlay_visible","false")).append("\n");
-        s.append("Следующий срок: ").append(d.due==null?"не назначен":d.due.atZone(java.time.ZoneId.systemDefault())).append("\nОсталось успешных «Помню»: ").append(d.remaining).append("\nПросрочено: ").append(d.expired).append("\nБез плана: ").append(d.withoutPlan).append("\n");
+        s.append("Карточек: ").append(store.cards().size()).append("\nPending: ").append(p==null?"нет":p.id).append("\nPending shown: ").append(p==null?"—":(p.shown>0?"да":"НЕТ, ещё не доставлен")).append("\nPending wait ms: ").append(pendingWait).append("\nOverlay visible: ").append(store.value("overlay_visible","false")).append("\n");
+        s.append("Следующий scheduler due: ").append(d.due==null?"не назначен":d.due.atZone(java.time.ZoneId.systemDefault())).append("\nScheduler due late ms: ").append(scheduledLate).append("\nОсталось успешных «Помню»: ").append(d.remaining).append("\nПросрочено по учебному дедлайну: ").append(d.expired).append("\nБез плана: ").append(d.withoutPlan).append("\n");
+        s.append("Recovery alarm: ").append(store.value("alarm_reason","none")).append(" · ").append(store.value("pending_retry_at","—")).append(" · ").append(store.value("alarm_precision","—")).append("\nLast recovery: ").append(store.value("last_recovery_action","ещё не было")).append("\n");String warning=store.value("recovery_warning","");if(!warning.isEmpty())s.append("Recovery warning: ").append(warning).append("\n");
         s.append("Ответов локально / readback: ").append(store.eventCount(false)).append(" / ").append(store.eventCount(true)).append("\nПоследнее действие: ").append(store.value("last_ui_action","ещё нет")).append("\n");
         s.append("Library state: ").append(store.value("library_sync_state","legacy")).append("\nLast library sync: ").append(store.value("last_library_sync","ещё нет")).append("\nidea-hub SHA: ").append(store.value("last_sync_source_sha","ещё нет")).append("\n");
         String libraryError=store.value("library_sync_error","");if(!libraryError.isEmpty())s.append("Library detail: ").append(libraryError).append("\n");
@@ -164,7 +167,8 @@ public final class MainActivity extends Activity {
             else heroMeta.setText("Идёт тестовый режим.\nNormal-прогресс не изменяется.");
         }else{
             testSurface.setVisibility(View.GONE);
-            if(p!=null)heroMeta.setText("Одна карточка уже ждёт ответа.\nСледующая не появится, пока ты её не закроешь.");
+            if(p!=null&&p.shown==0)heroMeta.setText("Карточка назначена, но ещё не показана.\nПосле блокировки она восстановится при следующей возможности доставки.");
+            else if(p!=null)heroMeta.setText("Одна карточка уже показана и ждёт ответа.\nСледующая не появится, пока ты её не закроешь.");
             else if(store.cards().isEmpty())heroMeta.setText("Карточек пока нет.\nОбнови библиотеку или настрой GitHub PAT.");
             else heroMeta.setText("Карточек: "+store.cards().size()+"\nСледующий показ: "+nextLabel(d));
         }

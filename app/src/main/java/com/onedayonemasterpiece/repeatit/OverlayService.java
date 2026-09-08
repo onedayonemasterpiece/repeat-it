@@ -53,7 +53,7 @@ public final class OverlayService extends Service {
     private boolean active(){return getSystemService(PowerManager.class).isInteractive();}
     private boolean locked(){return getSystemService(KeyguardManager.class).isDeviceLocked();}
     private void cancelContent(){String tag=store.value("notification_tag","");if(!tag.isEmpty())getSystemService(NotificationManager.class).cancel(tag,2);}
-    private void hide(){if(panel!=null){try{wm.removeView(panel);}catch(IllegalArgumentException ignored){}panel=null;visibleId="";}rememberX=rememberY=repeatX=repeatY=0;if(store!=null)store.put("overlay_visible","false");}
+    private void hide(){if(panel!=null){try{wm.removeView(panel);}catch(IllegalArgumentException ignored){}panel=null;visibleId="";}rememberX=rememberY=repeatX=repeatY=0;if(store!=null){store.put("overlay_attached","false");store.put("overlay_visible","false");}}
     private boolean previewAllowed(Store.Pending p){if(!p.card.preview)return false;for(Engine.Card c:store.cards())if(c.key().equals(p.card.key()))return c.preview&&c.active;return false;}
     private String sourceText(Engine.Card card,String key){if(card.source==null)return "";Object value=card.source.get(key);return value instanceof String?((String)value).trim():"";}
     private String presentation(Engine.Card card){String value=sourceText(card,"presentation");return value.isEmpty()?"thesis":value;}
@@ -78,6 +78,11 @@ public final class OverlayService extends Service {
     private void publishControls(View root,View remember,View repeat){root.post(()->{if(panel!=root)return;int[] a=new int[2],b=new int[2];remember.getLocationOnScreen(a);repeat.getLocationOnScreen(b);rememberX=a[0]+remember.getWidth()/2;rememberY=a[1]+remember.getHeight()/2;repeatX=b[0]+repeat.getWidth()/2;repeatY=b[1]+repeat.getHeight()/2;});}
     private void react(Store.Pending p,String reaction,TextView button){
         button.setEnabled(false);button.setAlpha(.55f);store.put("last_ui_action","reaction_"+reaction+"_tap@"+Instant.now());
+        if(!locked()){
+            // If Samsung restored an already-attached overlay without delivering USER_PRESENT to our process,
+            // the physical tap itself proves that the card was visible and interactive. Mark it before the atomic answer.
+            Store.Pending current=store.pending();if(current!=null&&current.id.equals(p.id)&&current.shown==0)store.markPresentation(p.id,true,true);
+        }
         if(!locked()&&store.answer(p.id,reaction)){
             store.put("last_ui_action","reaction_"+reaction+"_committed@"+Instant.now());Toast.makeText(this,reaction.equals("remember")?"Помню · сохранено":"Повторить · сохранено",Toast.LENGTH_SHORT).show();hide();cancelContent();tick();
         }else{
@@ -99,7 +104,7 @@ public final class OverlayService extends Service {
     }
 
     private void show(Store.Pending p){
-        if(panel!=null&&visibleId.equals(p.id))return;if(locked()||!active()||!Settings.canDrawOverlays(this))return;hide();
+        if(panel!=null&&visibleId.equals(p.id))return;if(!Settings.canDrawOverlays(this))return;hide();
 
         LinearLayout root=new LinearLayout(this);root.setOrientation(LinearLayout.VERTICAL);root.setPadding(dp(19),dp(17),dp(19),dp(17));root.setBackground(shape(GRAPHITE,30,0,0));root.setElevation(dp(12));
 
@@ -134,21 +139,26 @@ public final class OverlayService extends Service {
 
         int width,height;if(Build.VERSION.SDK_INT>=30){WindowMetrics metrics=wm.getMaximumWindowMetrics();Insets insets=metrics.getWindowInsets().getInsetsIgnoringVisibility(WindowInsets.Type.systemBars()|WindowInsets.Type.displayCutout());Rect bounds=metrics.getBounds();width=bounds.width()-insets.left-insets.right;height=bounds.height()-insets.top-insets.bottom;}else{android.util.DisplayMetrics metrics=new android.util.DisplayMetrics();wm.getDefaultDisplay().getMetrics(metrics);width=metrics.widthPixels;height=metrics.heightPixels;}
         WindowManager.LayoutParams params=new WindowManager.LayoutParams(Math.round(width*.94f),Math.round(height*.82f),WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE|WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL,PixelFormat.TRANSLUCENT);params.gravity=Gravity.CENTER;
-        try{wm.addView(root,params);panel=root;visibleId=p.id;store.put("overlay_geometry",params.width+"x"+params.height+"/"+width+"x"+height);store.put("overlay_visible","true");store.put("last_ui_action","overlay_presented@"+Instant.now());publishControls(root,remember,repeat);}catch(RuntimeException e){store.put("overlay_visible","false");store.put("delivery_error","overlay_failed:"+e.getClass().getSimpleName());}
+        try{wm.addView(root,params);panel=root;visibleId=p.id;store.put("overlay_geometry",params.width+"x"+params.height+"/"+width+"x"+height);store.put("overlay_attached","true");store.put("overlay_visible",String.valueOf(active()&&!locked()));store.put("last_ui_action",active()&&!locked()?"overlay_presented@"+Instant.now():"overlay_preattached@"+Instant.now());publishControls(root,remember,repeat);}catch(RuntimeException e){store.put("overlay_attached","false");store.put("overlay_visible","false");store.put("delivery_error","overlay_failed:"+e.getClass().getSimpleName());}
     }
 
     private void tick(){
         handler.removeCallbacks(boundary);
         if(store.value("paused","false").equals("true")){hide();cancelContent();PreviewWidget.refresh(this);stopSelf();return;}
         Instant now=Instant.now();boolean normal=store.mode().equals("normal");Engine.Window w=store.window();boolean mayStart=!normal||w.allowed(now);
-        if(!active()||MainActivity.visible){hide();cancelContent();}
+        if(MainActivity.visible){hide();cancelContent();}
         else{
             Store.Pending p=store.pending();boolean fresh=false;if(p==null&&mayStart){fresh=true;p=store.prepare(now);}
             if(p==null){hide();cancelContent();}
             else{
                 boolean maySurface=!normal||w.allowed(now)||p.shown>0;
                 if(!maySurface){hide();cancelContent();}
-                else{if(locked())hide();else show(p);boolean signal=store.markPresentation(p.id,panel!=null&&!locked(),fresh&&!locked()&&panel!=null);content(p,signal);}
+                else{
+                    // Attach even while the display/keyguard is hiding overlays. This keeps one due card ready to become
+                    // visible immediately after unlock if the foreground-service process survives OEM sleep handling.
+                    show(p);boolean activeUnlocked=active()&&!locked();boolean actuallyPresented=panel!=null&&activeUnlocked;store.put("overlay_visible",String.valueOf(actuallyPresented));
+                    boolean signal=actuallyPresented?store.markPresentation(p.id,true,fresh):false;content(p,signal);
+                }
             }
         }
         Delivery.arm(this);Instant next;if(normal)next=w.allowed(now)?w.close(now):w.next(now);else next=now.plus(Duration.ofHours(6));handler.postDelayed(boundary,Math.max(1,Duration.between(now,next).toMillis()));PreviewWidget.refresh(this);

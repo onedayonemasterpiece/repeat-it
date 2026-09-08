@@ -70,19 +70,35 @@ jobs:
             adb install apks/androidTest/debug/app-debug-androidTest.apk
             adb shell pm grant com.onedayonemasterpiece.repeatit android.permission.POST_NOTIFICATIONS || true
             adb shell appops set com.onedayonemasterpiece.repeatit SYSTEM_ALERT_WINDOW allow
+            adb shell appops set com.onedayonemasterpiece.repeatit SCHEDULE_EXACT_ALARM allow || true
             adb shell appops get com.onedayonemasterpiece.repeatit SYSTEM_ALERT_WINDOW
+            adb shell appops get com.onedayonemasterpiece.repeatit SCHEDULE_EXACT_ALARM || true
+            adb shell am instrument -w -e class com.onedayonemasterpiece.repeatit.ExactAlarmRecoveryTest com.onedayonemasterpiece.repeatit.test/androidx.test.runner.AndroidJUnitRunner | tee exact-alarm-recovery.txt
+            grep -q 'OK (1 test)' exact-alarm-recovery.txt
             adb shell am instrument -w -e class com.onedayonemasterpiece.repeatit.StorageCycleTest com.onedayonemasterpiece.repeatit.test/androidx.test.runner.AndroidJUnitRunner | tee storage-cycle.txt
             grep -q 'OK (1 test)' storage-cycle.txt
+
             adb shell am force-stop com.onedayonemasterpiece.repeatit || true
             adb shell pm clear com.onedayonemasterpiece.repeatit
             adb shell pm grant com.onedayonemasterpiece.repeatit android.permission.POST_NOTIFICATIONS || true
             adb shell appops set com.onedayonemasterpiece.repeatit SYSTEM_ALERT_WINDOW allow
+            adb shell appops set com.onedayonemasterpiece.repeatit SCHEDULE_EXACT_ALARM allow || true
+            adb shell am instrument -w -e class com.onedayonemasterpiece.repeatit.LockedDueAttachTest com.onedayonemasterpiece.repeatit.test/androidx.test.runner.AndroidJUnitRunner | tee locked-due-attach.txt
+            grep -q 'OK (1 test)' locked-due-attach.txt
+
+            adb shell am force-stop com.onedayonemasterpiece.repeatit || true
+            adb shell pm clear com.onedayonemasterpiece.repeatit
+            adb shell pm grant com.onedayonemasterpiece.repeatit android.permission.POST_NOTIFICATIONS || true
+            adb shell appops set com.onedayonemasterpiece.repeatit SYSTEM_ALERT_WINDOW allow
+            adb shell appops set com.onedayonemasterpiece.repeatit SCHEDULE_EXACT_ALARM allow || true
             adb shell appops get com.onedayonemasterpiece.repeatit SYSTEM_ALERT_WINDOW
+            adb shell appops get com.onedayonemasterpiece.repeatit SCHEDULE_EXACT_ALARM || true
             adb shell am instrument -w -e class com.onedayonemasterpiece.repeatit.OverlayStressTest com.onedayonemasterpiece.repeatit.test/androidx.test.runner.AndroidJUnitRunner | tee overlay-stress.txt
             adb pull /sdcard/Android/data/com.onedayonemasterpiece.repeatit/files/overlay-stress-debug.txt overlay-stress-debug.txt || true
             adb pull /sdcard/Android/data/com.onedayonemasterpiece.repeatit/files/overlay-window-hierarchy.xml overlay-window-hierarchy.xml || true
             adb pull /sdcard/Android/data/com.onedayonemasterpiece.repeatit/files/shareable-overlay.png shareable-overlay.png || true
             adb shell appops get com.onedayonemasterpiece.repeatit > appops.txt
+            adb shell dumpsys alarm > alarm-evidence.txt
             adb shell dumpsys window windows > window-evidence.txt
             adb shell dumpsys activity services com.onedayonemasterpiece.repeatit > service-evidence.txt
             adb shell dumpsys activity activities > activity-evidence.txt
@@ -109,13 +125,16 @@ jobs:
         with:
           name: emulator-evidence-${{ github.run_number }}
           path: |
+            exact-alarm-recovery.txt
             storage-cycle.txt
+            locked-due-attach.txt
             overlay-stress.txt
             overlay-stress-debug.txt
             overlay-window-hierarchy.xml
             overlay-stress-summary.txt
             shareable-overlay.png
             appops.txt
+            alarm-evidence.txt
             window-evidence.txt
             service-evidence.txt
             activity-evidence.txt
@@ -172,8 +191,8 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           if [ "$release_kind" = debug ]; then
-            NOTES='Hosted build, Android 15 transaction test and 40-cycle native overlay stress passed. Normal mode has an adaptive 15-to-10-minute attention floor between completed contacts; one pending card still blocks every other card. Agent debug is explicit-step only, test mode is visible/escapable in the owner UI, cards are screenshotable, and the PAT entry dialog remains protected. This APK uses a temporary build debug signature.'
+            NOTES='Hosted build, Android 15 exact-alarm recovery check, locked-due preattach regression, transaction test and 40-cycle native overlay stress passed. A due overlay is pre-attached while the phone sleeps without counting as shown; after unlock the same pending becomes the one visible card. A bounded non-wakeup recovery watchdog remains as process/OEM freeze insurance. Normal pacing remains 15-to-10 minutes and one pending blocks all other cards. This APK uses a temporary build debug signature.'
           else
-            NOTES='Hosted build, Android 15 transaction test and 40-cycle native overlay stress passed. Normal mode has an adaptive 15-to-10-minute attention floor between completed contacts; one pending card still blocks every other card. Agent debug is explicit-step only, test mode is visible/escapable in the owner UI, cards are screenshotable, and the PAT entry dialog remains protected. APK uses the configured permanent signing identity.'
+            NOTES='Hosted build, Android 15 exact-alarm recovery check, locked-due preattach regression, transaction test and 40-cycle native overlay stress passed. A due overlay is pre-attached while the phone sleeps without counting as shown; after unlock the same pending becomes the one visible card. A bounded non-wakeup recovery watchdog remains as process/OEM freeze insurance. Normal pacing remains 15-to-10 minutes and one pending blocks all other cards. APK uses the configured permanent signing identity.'
           fi
           gh release create "$release_tag" release/* --target "$GITHUB_SHA" --title "Повторение 0.1.$GITHUB_RUN_NUMBER ($release_kind)" --notes "$NOTES"
