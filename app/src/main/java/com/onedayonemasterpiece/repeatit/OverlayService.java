@@ -57,10 +57,16 @@ public final class OverlayService extends Service {
     private boolean previewAllowed(Store.Pending p){if(!p.card.preview)return false;for(Engine.Card c:store.cards())if(c.key().equals(p.card.key()))return c.preview&&c.active;return false;}
     private String sourceText(Engine.Card card,String key){if(card.source==null)return "";Object value=card.source.get(key);return value instanceof String?((String)value).trim():"";}
     private String presentation(Engine.Card card){String value=sourceText(card,"presentation");return value.isEmpty()?"thesis":value;}
+    private String metricValue(Engine.Card card){
+        if(card.source==null)return "";Object raw=card.source.get("metric");if(raw instanceof String)return ((String)raw).trim();
+        if(raw instanceof java.util.Map<?,?> map){Object value=map.get("value");return value instanceof String?((String)value).trim():"";}return "";
+    }
+    private String metricUnit(Engine.Card card){if(card.source==null)return "";Object raw=card.source.get("metric");if(raw instanceof java.util.Map<?,?> map){Object unit=map.get("unit");return unit instanceof String?((String)unit).trim():"";}return "";}
+    private String metricPlain(Engine.Card card){String value=metricValue(card),unit=metricUnit(card);if(unit.isEmpty())return value;boolean compact=java.util.Set.of("%","‰","×","x","X","K","M","B","k","m","b").contains(unit);return value+(compact?"":" ")+unit;}
     private void content(Store.Pending p,boolean signal){
         if(!active())return;if(locked()&&!previewAllowed(p)){cancelContent();return;}NotificationManager manager=getSystemService(NotificationManager.class);if(!manager.areNotificationsEnabled())return;
         AudioManager audio=getSystemService(AudioManager.class);signal=signal&&!locked()&&audio.getRingerMode()==AudioManager.RINGER_MODE_NORMAL&&manager.getCurrentInterruptionFilter()==NotificationManager.INTERRUPTION_FILTER_ALL;
-        String old=store.value("notification_tag","");if(!old.equals(p.id))cancelContent();String metric=presentation(p.card).equals("metric")?sourceText(p.card,"metric"):"";String fallback=(metric.isEmpty()?"":metric+" · ")+p.card.text;Notification.Builder b=new Notification.Builder(this,signal?SOUND:SILENT).setSmallIcon(R.drawable.ic_repeat).setContentTitle(p.card.title).setContentText(fallback).setStyle(new Notification.BigTextStyle().bigText(fallback)).setContentIntent(open()).setOnlyAlertOnce(true).setVisibility(Notification.VISIBILITY_PRIVATE).setOngoing(true);manager.notify(p.id,2,b.build());store.put("notification_tag",p.id);
+        String old=store.value("notification_tag","");if(!old.equals(p.id))cancelContent();String metric=presentation(p.card).equals("metric")?metricPlain(p.card):"";String fallback=(metric.isEmpty()?"":metric+" · ")+p.card.text;Notification.Builder b=new Notification.Builder(this,signal?SOUND:SILENT).setSmallIcon(R.drawable.ic_repeat).setContentTitle(p.card.title).setContentText(fallback).setStyle(new Notification.BigTextStyle().bigText(fallback)).setContentIntent(open()).setOnlyAlertOnce(true).setVisibility(Notification.VISIBILITY_PRIVATE).setOngoing(true);manager.notify(p.id,2,b.build());store.put("notification_tag",p.id);
     }
 
     private int dp(int value){return Math.round(value*getResources().getDisplayMetrics().density);}
@@ -80,6 +86,7 @@ public final class OverlayService extends Service {
     }
     private int bodySize(String text){int n=text==null?0:text.length();if(n>360)return 23;if(n>260)return 25;if(n>180)return 27;if(n>110)return 30;return 33;}
     private int metricSize(String metric){int n=metric==null?0:metric.length();if(n<=4)return 96;if(n<=8)return 84;if(n<=12)return 72;return 60;}
+    private int metricUnitSize(String unit){int n=unit==null?0:unit.length();if(n<=2)return 50;if(n<=5)return 40;return 32;}
     private void addDetail(LinearLayout panel,Engine.Card card){String detail=sourceText(card,"detail");if(detail.isEmpty())return;TextView note=label(detail,16,MUTED,editorial);note.setLineSpacing(dp(2),1.08f);note.setPadding(0,dp(18),0,0);panel.addView(note);}
     private void addImage(LinearLayout panel,Engine.Card card,boolean hero){
         if(card.image.isEmpty()){
@@ -97,8 +104,8 @@ public final class OverlayService extends Service {
         LinearLayout root=new LinearLayout(this);root.setOrientation(LinearLayout.VERTICAL);root.setPadding(dp(19),dp(17),dp(19),dp(17));root.setBackground(shape(GRAPHITE,30,0,0));root.setElevation(dp(12));
 
         LinearLayout toolbar=new LinearLayout(this);toolbar.setGravity(Gravity.CENTER_VERTICAL);toolbar.setOrientation(LinearLayout.HORIZONTAL);
-        TextView badge=micro("СЕЙЧАС",GRAPHITE);badge.setGravity(Gravity.CENTER);badge.setBackground(shape(ORANGE,14,0,0));badge.setPadding(dp(11),dp(7),dp(11),dp(7));toolbar.addView(badge);
-        TextView brand=micro("REPEAT IT",MUTED);brand.setPadding(dp(12),0,0,0);toolbar.addView(brand,new LinearLayout.LayoutParams(0,-2,1));
+        boolean test=!store.mode().equals("normal");TextView badge=micro(test?"ТЕСТ":"СЕЙЧАС",GRAPHITE);badge.setGravity(Gravity.CENTER);badge.setBackground(shape(ORANGE,14,0,0));badge.setPadding(dp(11),dp(7),dp(11),dp(7));toolbar.addView(badge);
+        String brandText=test?store.mode().toUpperCase(java.util.Locale.ROOT).replace('_',' '):"REPEAT IT";TextView brand=micro(brandText,MUTED);brand.setPadding(dp(12),0,0,0);toolbar.addView(brand,new LinearLayout.LayoutParams(0,-2,1));
         TextView sound=label(store.sound()?"♪":"×",22,store.sound()?ORANGE:PAPER,display);sound.setGravity(Gravity.CENTER);sound.setBackground(ripple(GRAPHITE_SOFT,22,ORANGE,1));sound.setMinWidth(dp(46));sound.setMinHeight(dp(46));sound.setContentDescription(store.sound()?"Выключить звук следующих карточек":"Включить звук следующих карточек");sound.setClickable(true);sound.setFocusable(true);sound.setOnClickListener(v->{boolean next=!store.sound();store.put("sound",String.valueOf(next));store.put("last_ui_action","sound_"+(next?"on":"off")+"@"+Instant.now());sound.setText(next?"♪":"×");sound.setTextColor(next?ORANGE:PAPER);sound.setContentDescription(next?"Выключить звук следующих карточек":"Включить звук следующих карточек");Toast.makeText(this,next?"Звук следующих карточек включён":"Звук следующих карточек выключен",Toast.LENGTH_SHORT).show();});toolbar.addView(sound,new LinearLayout.LayoutParams(dp(46),dp(46)));root.addView(toolbar);
 
         View accent=new View(this);accent.setBackground(shape(ORANGE,3,0,0));LinearLayout.LayoutParams accentP=new LinearLayout.LayoutParams(dp(54),dp(4));accentP.setMargins(0,dp(18),0,dp(16));root.addView(accent,accentP);
@@ -109,7 +116,9 @@ public final class OverlayService extends Service {
 
         String type=presentation(p.card);
         if(type.equals("metric")){
-            String metric=sourceText(p.card,"metric");TextView number=label(metric,metricSize(metric),PAPER,display);number.setLetterSpacing(-.025f);number.setPadding(0,dp(14),0,0);bodyPanel.addView(number);
+            String value=metricValue(p.card),unit=metricUnit(p.card);LinearLayout metricRow=new LinearLayout(this);metricRow.setOrientation(LinearLayout.HORIZONTAL);metricRow.setGravity(Gravity.BOTTOM);
+            TextView number=label(value,metricSize(value),PAPER,display);number.setLetterSpacing(-.025f);number.setPadding(0,dp(14),0,0);metricRow.addView(number);
+            if(!unit.isEmpty()){TextView unitView=label(unit,metricUnitSize(unit),ORANGE,display);unitView.setPadding(dp(7),0,0,dp(9));metricRow.addView(unitView);}bodyPanel.addView(metricRow);
             TextView thesis=label(p.card.text,Math.min(28,bodySize(p.card.text)),PAPER,display);thesis.setLetterSpacing(-.01f);thesis.setLineSpacing(dp(2),1.05f);thesis.setPadding(0,dp(8),0,0);bodyPanel.addView(thesis);addDetail(bodyPanel,p.card);
         }else if(type.equals("image")){
             addImage(bodyPanel,p.card,true);TextView thesis=label(p.card.text,Math.min(27,bodySize(p.card.text)),PAPER,display);thesis.setLetterSpacing(-.01f);thesis.setLineSpacing(dp(2),1.05f);thesis.setPadding(0,dp(16),0,0);bodyPanel.addView(thesis);addDetail(bodyPanel,p.card);
@@ -124,7 +133,7 @@ public final class OverlayService extends Service {
         reactions.addView(repeat,new LinearLayout.LayoutParams(0,dp(66),1));LinearLayout.LayoutParams rp=new LinearLayout.LayoutParams(0,dp(66),1);rp.setMargins(dp(9),0,0,0);reactions.addView(remember,rp);root.addView(reactions);
 
         int width,height;if(Build.VERSION.SDK_INT>=30){WindowMetrics metrics=wm.getMaximumWindowMetrics();Insets insets=metrics.getWindowInsets().getInsetsIgnoringVisibility(WindowInsets.Type.systemBars()|WindowInsets.Type.displayCutout());Rect bounds=metrics.getBounds();width=bounds.width()-insets.left-insets.right;height=bounds.height()-insets.top-insets.bottom;}else{android.util.DisplayMetrics metrics=new android.util.DisplayMetrics();wm.getDefaultDisplay().getMetrics(metrics);width=metrics.widthPixels;height=metrics.heightPixels;}
-        WindowManager.LayoutParams params=new WindowManager.LayoutParams(Math.round(width*.94f),Math.round(height*.82f),WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE|WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL|WindowManager.LayoutParams.FLAG_SECURE,PixelFormat.TRANSLUCENT);params.gravity=Gravity.CENTER;
+        WindowManager.LayoutParams params=new WindowManager.LayoutParams(Math.round(width*.94f),Math.round(height*.82f),WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE|WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL,PixelFormat.TRANSLUCENT);params.gravity=Gravity.CENTER;
         try{wm.addView(root,params);panel=root;visibleId=p.id;store.put("overlay_geometry",params.width+"x"+params.height+"/"+width+"x"+height);store.put("overlay_visible","true");store.put("last_ui_action","overlay_presented@"+Instant.now());publishControls(root,remember,repeat);}catch(RuntimeException e){store.put("overlay_visible","false");store.put("delivery_error","overlay_failed:"+e.getClass().getSimpleName());}
     }
 
