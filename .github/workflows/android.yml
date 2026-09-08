@@ -81,6 +81,7 @@ jobs:
             adb shell am instrument -w -e class com.onedayonemasterpiece.repeatit.OverlayStressTest com.onedayonemasterpiece.repeatit.test/androidx.test.runner.AndroidJUnitRunner | tee overlay-stress.txt
             adb pull /sdcard/Android/data/com.onedayonemasterpiece.repeatit/files/overlay-stress-debug.txt overlay-stress-debug.txt || true
             adb pull /sdcard/Android/data/com.onedayonemasterpiece.repeatit/files/overlay-window-hierarchy.xml overlay-window-hierarchy.xml || true
+            adb pull /sdcard/Android/data/com.onedayonemasterpiece.repeatit/files/shareable-overlay.png shareable-overlay.png || true
             adb shell appops get com.onedayonemasterpiece.repeatit > appops.txt
             adb shell dumpsys window windows > window-evidence.txt
             adb shell dumpsys activity services com.onedayonemasterpiece.repeatit > service-evidence.txt
@@ -99,6 +100,10 @@ jobs:
             grep -q '^stateful_pause_control=1$' overlay-stress-summary.txt
             grep -q '^auto_active_without_enable=1$' overlay-stress-summary.txt
             grep -q '^primary_controls_visible_without_scroll=1$' overlay-stress-summary.txt
+            grep -q '^test_mode_indicator=1$' overlay-stress-summary.txt
+            grep -q '^agent_debug_manual_step=1$' overlay-stress-summary.txt
+            grep -q '^screenshot_shareable=1$' overlay-stress-summary.txt
+            test -s shareable-overlay.png
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -109,6 +114,7 @@ jobs:
             overlay-stress-debug.txt
             overlay-window-hierarchy.xml
             overlay-stress-summary.txt
+            shareable-overlay.png
             appops.txt
             window-evidence.txt
             service-evidence.txt
@@ -166,8 +172,8 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           if [ "$release_kind" = debug ]; then
-            NOTES='Hosted build, Android 15 transaction test and 40-cycle delayed native overlay stress journey passed. Delivery is active by default after setup; the only user stop state is explicit Pause, and the stateful Pause/Resume control is exercised in emulator acceptance. New normal presentations use the owner window; an already-shown pending card persists until response. This APK uses a temporary build debug signature.'
+            NOTES='Hosted build, Android 15 transaction test and 40-cycle native overlay stress passed. Normal mode has an adaptive 15-to-5-minute attention floor between completed contacts; one pending card still blocks every other card. Agent debug is explicit-step only, test mode is visible/escapable in the owner UI, cards are screenshotable, and the PAT entry dialog remains protected. This APK uses a temporary build debug signature.'
           else
-            NOTES='Hosted build, Android 15 transaction test and 40-cycle delayed native overlay stress journey passed. Delivery is active by default after setup; the only user stop state is explicit Pause, and the stateful Pause/Resume control is exercised in emulator acceptance. New normal presentations use the owner window; an already-shown pending card persists until response. APK uses the configured permanent signing identity.'
+            NOTES='Hosted build, Android 15 transaction test and 40-cycle native overlay stress passed. Normal mode has an adaptive 15-to-5-minute attention floor between completed contacts; one pending card still blocks every other card. Agent debug is explicit-step only, test mode is visible/escapable in the owner UI, cards are screenshotable, and the PAT entry dialog remains protected. APK uses the configured permanent signing identity.'
           fi
           gh release create "$release_tag" release/* --target "$GITHUB_SHA" --title "Повторение 0.1.$GITHUB_RUN_NUMBER ($release_kind)" --notes "$NOTES"
