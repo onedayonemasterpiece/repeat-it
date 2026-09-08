@@ -75,7 +75,7 @@ public final class Engine {
         String deck; Plan p; final List<Item> items=new ArrayList<>();
         int remaining, evidenceAttempts, evidenceRemembers;
         double successProbability, estimatedAttempts, ratePerAllowedMillis;
-        Instant lastService, earliestEligible;
+        Instant earliestEligible;
     }
     private static final class Evidence {int attempts,remembers;}
 
@@ -83,8 +83,9 @@ public final class Engine {
      * Global policy:
      * 1) each deck is a persistent ring: among eligible cards, least-recently-served wins;
      * 2) "repeat" never moves a card to the front: it updates last/eligibility and therefore goes to the tail;
-     * 3) decks earn turns continuously at a rate derived from remaining workload and deadline pressure;
-     * 4) observed repeats increase estimated workload for the deck, not priority of the same card.
+     * 3) decks share the single human channel using weighted fair queuing;
+     * 4) a deck's weight comes from estimated remaining attempts / allowed time to its deadline;
+     * 5) observed repeats increase the deck workload forecast, not priority of the same card.
      */
     public static Decision next(List<Card> cards,List<Plan> plans,Map<String,State> states,Instant now,Window w,List<Long> responseLatencies){
         Decision result=new Decision();
@@ -104,7 +105,7 @@ public final class Engine {
         for(Map.Entry<String,List<Item>> entry:grouped.entrySet()){
             Lane lane=new Lane();lane.deck=entry.getKey();lane.items.addAll(entry.getValue());lane.p=lane.items.get(0).p;
             Evidence ev=evidence.getOrDefault(lane.deck,new Evidence());lane.evidenceAttempts=ev.attempts;lane.evidenceRemembers=ev.remembers;
-            for(Item x:lane.items){lane.remaining+=x.n;if(lane.lastService==null||(x.s.last!=null&&x.s.last.isAfter(lane.lastService)))lane.lastService=x.s.last;if(lane.earliestEligible==null||x.eligible.isBefore(lane.earliestEligible))lane.earliestEligible=x.eligible;}
+            for(Item x:lane.items){lane.remaining+=x.n;if(lane.earliestEligible==null||x.eligible.isBefore(lane.earliestEligible))lane.earliestEligible=x.eligible;}
             lane.successProbability=clamp((lane.evidenceRemembers+PRIOR_REMEMBERS)/(lane.evidenceAttempts+PRIOR_REMEMBERS+PRIOR_REPEATS),MIN_SUCCESS_PROBABILITY,MAX_SUCCESS_PROBABILITY);
             lane.estimatedAttempts=(lane.remaining/lane.successProbability)*DEADLINE_UNCERTAINTY_RESERVE;result.estimatedRemainingAttempts+=lane.estimatedAttempts;
             long horizonMillis;
@@ -141,11 +142,13 @@ public final class Engine {
         }
         if(ready.isEmpty())return result;
 
-        long bootstrap=Math.max(1,result.spacingMillis>0?result.spacingMillis:Duration.ofMinutes(15).toMillis());
-        Lane selected=null;double selectedScore=Double.NEGATIVE_INFINITY;
+        // Weighted fair queue. attempts/rate has units of virtual allowed-time already consumed by a deck.
+        // Choosing the smallest next virtual finish gives urgent decks proportionally more turns while every
+        // positive-rate ready deck continues to accumulate service opportunities instead of being starved.
+        Lane selected=null;double selectedFinish=Double.POSITIVE_INFINITY;
         for(Lane lane:ready){
-            long age=lane.lastService==null?bootstrap:w.available(lane.lastService,slot);double score=lane.ratePerAllowedMillis*Math.max(1,age);
-            if(selected==null||score>selectedScore+1e-12||(Math.abs(score-selectedScore)<=1e-12&&laneTie(lane,selected,slot)<0)){selected=lane;selectedScore=score;}
+            double rate=Math.max(1e-18,lane.ratePerAllowedMillis);double virtualFinish=(lane.evidenceAttempts+1.0)/rate;
+            if(selected==null||virtualFinish<selectedFinish-1e-9||(Math.abs(virtualFinish-selectedFinish)<=1e-9&&laneTie(lane,selected,slot)<0)){selected=lane;selectedFinish=virtualFinish;}
         }
         Item item=selectRingItem(selected,slot);if(item==null)return result;
         result.cardKey=item.c.key();result.due=item.eligible.isAfter(slot)?item.eligible:slot;return result;
