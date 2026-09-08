@@ -25,14 +25,23 @@ public final class OverlayService extends Service {
     private static final int MUTED=0xffc3c9c3;
     private static final int ORANGE=0xffef4b23;
     private static final int WHITE=0xffffffff;
+    static final long TOUCH_GUARD_MS=2000;
 
     private final Typeface display=Typeface.create("sans-serif-medium",Typeface.NORMAL);
     private final Typeface body=Typeface.create("sans-serif",Typeface.NORMAL);
     private final Typeface editorial=Typeface.create("serif",Typeface.ITALIC);
 
     private Store store;private WindowManager wm;private View panel;private String visibleId="";
+    private TextView guardRemember,guardRepeat,guardSound;
+    private String guardedId="";private long guardUntilElapsed=0;
     static volatile int rememberX,rememberY,repeatX,repeatY;
+    static volatile boolean controlsReady=false;
+    static volatile int touchGuardBlocked=0;
     private final Handler handler=new Handler(Looper.getMainLooper());private final Runnable boundary=this::tick;
+    private final Runnable armControls=new Runnable(){@Override public void run(){
+        if(panel==null)return;long now=SystemClock.elapsedRealtime();if(now<guardUntilElapsed){handler.postDelayed(this,Math.max(1,guardUntilElapsed-now));return;}
+        controlsReady=true;setGuardVisual(true);if(store!=null){store.put("touch_guard_state","ready");store.put("touch_guard_until_elapsed",String.valueOf(guardUntilElapsed));}
+    }};
     private final BroadcastReceiver changes=new BroadcastReceiver(){@Override public void onReceive(Context c,Intent i){tick();}};
     public static final String SILENT="cards-silent-v1",SOUND="cards-chime-v1",SERVICE="service-v1";
 
@@ -53,7 +62,21 @@ public final class OverlayService extends Service {
     private boolean active(){return getSystemService(PowerManager.class).isInteractive();}
     private boolean locked(){return getSystemService(KeyguardManager.class).isDeviceLocked();}
     private void cancelContent(){String tag=store.value("notification_tag","");if(!tag.isEmpty())getSystemService(NotificationManager.class).cancel(tag,2);}
-    private void hide(){if(panel!=null){try{wm.removeView(panel);}catch(IllegalArgumentException ignored){}panel=null;visibleId="";}rememberX=rememberY=repeatX=repeatY=0;if(store!=null){store.put("overlay_attached","false");store.put("overlay_visible","false");}}
+    private void setGuardVisual(boolean ready){float alpha=ready?1f:.44f;if(guardRemember!=null)guardRemember.setAlpha(alpha);if(guardRepeat!=null)guardRepeat.setAlpha(alpha);if(guardSound!=null)guardSound.setAlpha(ready?1f:.55f);}
+    private void resetGuard(){handler.removeCallbacks(armControls);guardRemember=guardRepeat=guardSound=null;guardedId="";guardUntilElapsed=0;controlsReady=false;if(store!=null){store.put("touch_guard_state","idle");store.put("touch_guard_until_elapsed","0");}}
+    private void hide(){if(panel!=null){try{wm.removeView(panel);}catch(IllegalArgumentException ignored){}panel=null;visibleId="";}rememberX=rememberY=repeatX=repeatY=0;resetGuard();if(store!=null){store.put("overlay_attached","false");store.put("overlay_visible","false");}}
+    private void beginTouchGuard(String pendingId){
+        if(panel==null||pendingId==null||pendingId.isEmpty())return;handler.removeCallbacks(armControls);guardedId=pendingId;guardUntilElapsed=SystemClock.elapsedRealtime()+TOUCH_GUARD_MS;controlsReady=false;setGuardVisual(false);store.put("touch_guard_state","cooling");store.put("touch_guard_until_elapsed",String.valueOf(guardUntilElapsed));handler.postDelayed(armControls,TOUCH_GUARD_MS);
+    }
+    private boolean interactionReady(Store.Pending p){
+        if(p==null||panel==null||locked()||!active())return false;long now=SystemClock.elapsedRealtime();
+        Store.Pending current=store.pending();if(current==null||!current.id.equals(p.id))return false;
+        if(current.shown==0)store.markPresentation(p.id,true,true);
+        if(!p.id.equals(guardedId)||guardUntilElapsed==0){beginTouchGuard(p.id);touchGuardBlocked++;store.put("last_ui_action","touch_guard_blocked@"+Instant.now());return false;}
+        if(now<guardUntilElapsed){touchGuardBlocked++;store.put("last_ui_action","touch_guard_blocked@"+Instant.now());return false;}
+        if(!controlsReady){controlsReady=true;setGuardVisual(true);store.put("touch_guard_state","ready");}
+        return true;
+    }
     private boolean previewAllowed(Store.Pending p){if(!p.card.preview)return false;for(Engine.Card c:store.cards())if(c.key().equals(p.card.key()))return c.preview&&c.active;return false;}
     private String sourceText(Engine.Card card,String key){if(card.source==null)return "";Object value=card.source.get(key);return value instanceof String?((String)value).trim():"";}
     private String presentation(Engine.Card card){String value=sourceText(card,"presentation");return value.isEmpty()?"thesis":value;}
@@ -74,15 +97,12 @@ public final class OverlayService extends Service {
     private TextView micro(String content,int color){TextView t=label(content,11,color,display);t.setLetterSpacing(.15f);return t;}
     private GradientDrawable shape(int color,int radius,int stroke,int strokeWidth){GradientDrawable g=new GradientDrawable();g.setColor(color);g.setCornerRadius(dp(radius));if(strokeWidth>0)g.setStroke(dp(strokeWidth),stroke);return g;}
     private RippleDrawable ripple(int fill,int radius,int stroke,int strokeWidth){return new RippleDrawable(ColorStateList.valueOf(0x33ffffff),shape(fill,radius,stroke,strokeWidth),null);}
-    private TextView action(String title,int fill,int textColor,int stroke,int strokeWidth){TextView t=label(title,19,textColor,display);t.setGravity(Gravity.CENTER);t.setMinHeight(dp(66));t.setPadding(dp(14),0,dp(14),0);t.setBackground(ripple(fill,22,stroke,strokeWidth));t.setClickable(true);t.setFocusable(true);return t;}
+    private TextView action(String title,int fill,int textColor,int stroke,int strokeWidth){TextView t=label(title,19,textColor,display);t.setGravity(Gravity.CENTER);t.setMinHeight(dp(66));t.setPadding(dp(14),0,dp(14),0);t.setBackground(ripple(fill,radiusForButton(),stroke,strokeWidth));t.setClickable(true);t.setFocusable(true);return t;}
+    private int radiusForButton(){return 22;}
     private void publishControls(View root,View remember,View repeat){root.post(()->{if(panel!=root)return;int[] a=new int[2],b=new int[2];remember.getLocationOnScreen(a);repeat.getLocationOnScreen(b);rememberX=a[0]+remember.getWidth()/2;rememberY=a[1]+remember.getHeight()/2;repeatX=b[0]+repeat.getWidth()/2;repeatY=b[1]+repeat.getHeight()/2;});}
     private void react(Store.Pending p,String reaction,TextView button){
+        if(!interactionReady(p))return;
         button.setEnabled(false);button.setAlpha(.55f);store.put("last_ui_action","reaction_"+reaction+"_tap@"+Instant.now());
-        if(!locked()){
-            // If Samsung restored an already-attached overlay without delivering USER_PRESENT to our process,
-            // the physical tap itself proves that the card was visible and interactive. Mark it before the atomic answer.
-            Store.Pending current=store.pending();if(current!=null&&current.id.equals(p.id)&&current.shown==0)store.markPresentation(p.id,true,true);
-        }
         if(!locked()&&store.answer(p.id,reaction)){
             store.put("last_ui_action","reaction_"+reaction+"_committed@"+Instant.now());Toast.makeText(this,reaction.equals("remember")?"Помню · сохранено":"Повторить · сохранено",Toast.LENGTH_SHORT).show();hide();cancelContent();tick();
         }else{
@@ -111,7 +131,7 @@ public final class OverlayService extends Service {
         LinearLayout toolbar=new LinearLayout(this);toolbar.setGravity(Gravity.CENTER_VERTICAL);toolbar.setOrientation(LinearLayout.HORIZONTAL);
         boolean test=!store.mode().equals("normal");TextView badge=micro(test?"ТЕСТ":"СЕЙЧАС",GRAPHITE);badge.setGravity(Gravity.CENTER);badge.setBackground(shape(ORANGE,14,0,0));badge.setPadding(dp(11),dp(7),dp(11),dp(7));toolbar.addView(badge);
         String brandText=test?store.mode().toUpperCase(java.util.Locale.ROOT).replace('_',' '):"REPEAT IT";TextView brand=micro(brandText,MUTED);brand.setPadding(dp(12),0,0,0);toolbar.addView(brand,new LinearLayout.LayoutParams(0,-2,1));
-        TextView sound=label(store.sound()?"♪":"×",22,store.sound()?ORANGE:PAPER,display);sound.setGravity(Gravity.CENTER);sound.setBackground(ripple(GRAPHITE_SOFT,22,ORANGE,1));sound.setMinWidth(dp(46));sound.setMinHeight(dp(46));sound.setContentDescription(store.sound()?"Выключить звук следующих карточек":"Включить звук следующих карточек");sound.setClickable(true);sound.setFocusable(true);sound.setOnClickListener(v->{boolean next=!store.sound();store.put("sound",String.valueOf(next));store.put("last_ui_action","sound_"+(next?"on":"off")+"@"+Instant.now());sound.setText(next?"♪":"×");sound.setTextColor(next?ORANGE:PAPER);sound.setContentDescription(next?"Выключить звук следующих карточек":"Включить звук следующих карточек");Toast.makeText(this,next?"Звук следующих карточек включён":"Звук следующих карточек выключен",Toast.LENGTH_SHORT).show();});toolbar.addView(sound,new LinearLayout.LayoutParams(dp(46),dp(46)));root.addView(toolbar);
+        TextView sound=label(store.sound()?"♪":"×",22,store.sound()?ORANGE:PAPER,display);sound.setGravity(Gravity.CENTER);sound.setBackground(ripple(GRAPHITE_SOFT,22,ORANGE,1));sound.setMinWidth(dp(46));sound.setMinHeight(dp(46));sound.setContentDescription(store.sound()?"Выключить звук следующих карточек":"Включить звук следующих карточек");sound.setClickable(true);sound.setFocusable(true);sound.setOnClickListener(v->{if(!interactionReady(p))return;boolean next=!store.sound();store.put("sound",String.valueOf(next));store.put("last_ui_action","sound_"+(next?"on":"off")+"@"+Instant.now());sound.setText(next?"♪":"×");sound.setTextColor(next?ORANGE:PAPER);sound.setContentDescription(next?"Выключить звук следующих карточек":"Включить звук следующих карточек");Toast.makeText(this,next?"Звук следующих карточек включён":"Звук следующих карточек выключен",Toast.LENGTH_SHORT).show();});toolbar.addView(sound,new LinearLayout.LayoutParams(dp(46),dp(46)));root.addView(toolbar);
 
         View accent=new View(this);accent.setBackground(shape(ORANGE,3,0,0));LinearLayout.LayoutParams accentP=new LinearLayout.LayoutParams(dp(54),dp(4));accentP.setMargins(0,dp(18),0,dp(16));root.addView(accent,accentP);
 
@@ -136,6 +156,7 @@ public final class OverlayService extends Service {
         TextView repeat=action("Повторить",GRAPHITE,PAPER,0xff71766f,1);repeat.setContentDescription("repeat-it-repeat");repeat.setOnClickListener(v->react(p,"repeat",repeat));
         TextView remember=action("Помню  →",ORANGE,WHITE,ORANGE,0);remember.setContentDescription("repeat-it-remember");remember.setOnClickListener(v->react(p,"remember",remember));
         reactions.addView(repeat,new LinearLayout.LayoutParams(0,dp(66),1));LinearLayout.LayoutParams rp=new LinearLayout.LayoutParams(0,dp(66),1);rp.setMargins(dp(9),0,0,0);reactions.addView(remember,rp);root.addView(reactions);
+        guardRemember=remember;guardRepeat=repeat;guardSound=sound;setGuardVisual(false);controlsReady=false;
 
         int width,height;if(Build.VERSION.SDK_INT>=30){WindowMetrics metrics=wm.getMaximumWindowMetrics();Insets insets=metrics.getWindowInsets().getInsetsIgnoringVisibility(WindowInsets.Type.systemBars()|WindowInsets.Type.displayCutout());Rect bounds=metrics.getBounds();width=bounds.width()-insets.left-insets.right;height=bounds.height()-insets.top-insets.bottom;}else{android.util.DisplayMetrics metrics=new android.util.DisplayMetrics();wm.getDefaultDisplay().getMetrics(metrics);width=metrics.widthPixels;height=metrics.heightPixels;}
         WindowManager.LayoutParams params=new WindowManager.LayoutParams(Math.round(width*.94f),Math.round(height*.82f),WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE|WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL,PixelFormat.TRANSLUCENT);params.gravity=Gravity.CENTER;
@@ -154,10 +175,11 @@ public final class OverlayService extends Service {
                 boolean maySurface=!normal||w.allowed(now)||p.shown>0;
                 if(!maySurface){hide();cancelContent();}
                 else{
+                    boolean wasVisible=store.value("overlay_visible","false").equals("true");
                     // Attach even while the display/keyguard is hiding overlays. This keeps one due card ready to become
                     // visible immediately after unlock if the foreground-service process survives OEM sleep handling.
                     show(p);boolean activeUnlocked=active()&&!locked();boolean actuallyPresented=panel!=null&&activeUnlocked;store.put("overlay_visible",String.valueOf(actuallyPresented));
-                    boolean signal=actuallyPresented?store.markPresentation(p.id,true,fresh):false;content(p,signal);
+                    boolean signal=actuallyPresented?store.markPresentation(p.id,true,fresh):false;if(actuallyPresented&&!wasVisible)beginTouchGuard(p.id);content(p,signal);
                 }
             }
         }
