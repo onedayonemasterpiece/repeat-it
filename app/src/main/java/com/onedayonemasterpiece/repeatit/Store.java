@@ -13,7 +13,8 @@ import java.util.*;
 public final class Store extends SQLiteOpenHelper {
     public static final Gson JSON=new GsonBuilder().registerTypeAdapter(Instant.class,(JsonSerializer<Instant>)(v,t,c)->new JsonPrimitive(v.toString()))
         .registerTypeAdapter(Instant.class,(JsonDeserializer<Instant>)(v,t,c)->Instant.parse(v.getAsString())).create();
-    private static final long SAFE_GAP_MS=Duration.ofMinutes(3).toMillis();
+    private static final long NORMAL_GAP_DEFAULT_MS=Duration.ofMinutes(15).toMillis();
+    private static final long NORMAL_GAP_MIN_MS=Duration.ofMinutes(5).toMillis();
     private static final long MAX_JITTER_MS=Duration.ofMinutes(10).toMillis();
     private static Store instance;
     static Clock clock=Clock.systemDefaultZone();
@@ -48,11 +49,20 @@ public final class Store extends SQLiteOpenHelper {
     private static Instant later(Instant a,Instant b){return a.isAfter(b)?a:b;}
     private boolean hasAnyPending(){try(Cursor c=getReadableDatabase().rawQuery("SELECT COUNT(*) FROM pending",null)){c.moveToFirst();return c.getInt(0)>0;}}
 
+    /** Normal mode is an interruption channel, so attention has its own deterministic safety floor. */
+    private long attentionGap(Engine.Decision d){
+        double requiredPerHour=0;for(Engine.Load load:d.loads)if(load.requiredPerAllowedHour!=null)requiredPerHour=Math.max(requiredPerHour,load.requiredPerAllowedHour);
+        if(requiredPerHour<=4.0)return NORMAL_GAP_DEFAULT_MS;
+        long calculated=(long)Math.floor(3600000.0/requiredPerHour);
+        if(calculated<NORMAL_GAP_MIN_MS){if(!d.feasibility.startsWith("deadline_missed"))d.feasibility="risk_from_attention_floor";return NORMAL_GAP_MIN_MS;}
+        return Math.min(NORMAL_GAP_DEFAULT_MS,Math.max(NORMAL_GAP_MIN_MS,calculated));
+    }
+
     /** Human pacing floor plus stable bounded jitter. This changes timing, never identity/mastery. */
     private void pace(Engine.Decision d,Instant now,Map<String,Engine.State> states){
         if(d.due==null||d.cardKey==null)return;Engine.Card card=cardByKey(d.cardKey);if(card==null)return;Engine.State state=states.getOrDefault(card.learningKey(),new Engine.State());
-        Instant floor=window().next(now);String last=value("last_answer_at","");
-        if(!last.isEmpty())try{floor=later(floor,window().next(Instant.parse(last).plusMillis(SAFE_GAP_MS)));}catch(RuntimeException ignored){}
+        Instant floor=window().next(now);String last=value("last_answer_at","");long gap=attentionGap(d);
+        if(!last.isEmpty())try{floor=later(floor,window().next(Instant.parse(last).plusMillis(gap)));}catch(RuntimeException ignored){}
         Instant eligible=state.eligible==null?floor:window().next(state.eligible);Instant minimum=later(floor,eligible);Instant due=later(d.due,minimum);
         long span=Math.max(0,Duration.between(now,due).toMillis());long radius=Math.min(MAX_JITTER_MS,span/12);
         if(radius>0){
@@ -71,8 +81,11 @@ public final class Store extends SQLiteOpenHelper {
         String mode=mode();Engine.Decision d;
         if(!mode.equals("normal")){
             d=new Engine.Decision();List<Engine.Card> all=cards();all.removeIf(c->!c.active);int position=Integer.parseInt(value("test_position_"+mode,"0"));
-            if(position<all.size()){d.cardKey=all.get(position).key();d.due=now.plusMillis(mode.equals("user_demo")?300000:1000);d.remaining=all.size()-position;}
-            else d.feasibility="test_session_complete";
+            if(position<all.size()){
+                d.cardKey=all.get(position).key();d.remaining=all.size()-position;
+                if(mode.equals("user_demo"))d.due=now.plusMillis(300000);
+                else d.feasibility="agent_debug_waiting_for_force_due";
+            }else d.feasibility="test_session_complete";
         }else{
             Map<String,Engine.State> states=new HashMap<>();List<Long> latency=new ArrayList<>();for(Engine.Card c:cards())states.put(c.learningKey(),state(c,mode));
             try(Cursor rows=getReadableDatabase().rawQuery("SELECT body FROM events WHERE mode='normal' ORDER BY rowid DESC LIMIT 100",null)){while(rows.moveToNext()){JsonObject e=JsonParser.parseString(rows.getString(0)).getAsJsonObject();if(e.has("latency_ms"))latency.add(e.get("latency_ms").getAsLong());}}
@@ -136,6 +149,10 @@ public final class Store extends SQLiteOpenHelper {
         if(!Set.of("normal","agent_debug","user_demo").contains(requested))throw new IllegalArgumentException("invalid_mode");String current=mode();
         if(hasAnyPending()){if(requested.equals(current))return;throw new IllegalStateException("pending_must_be_answered_before_mode_change");}
         SQLiteDatabase db=getWritableDatabase();db.beginTransaction();try{put("mode",requested);if(!requested.equals("normal"))put("test_position_"+requested,"0");replan(now());db.setTransactionSuccessful();}finally{db.endTransaction();}
+    }
+    /** Owner escape hatch: discard test-only pending without creating a learning response and return to normal. */
+    public synchronized void exitTestMode(){
+        String current=mode();if(current.equals("normal"))return;SQLiteDatabase db=getWritableDatabase();db.beginTransaction();try{db.delete("pending","mode=?",new String[]{current});put("mode","normal");put("paused","false");replan(now());db.setTransactionSuccessful();}finally{db.endTransaction();}
     }
     public synchronized void forceDue(){if(!mode().equals("agent_debug"))throw new SecurityException("agent_debug_only");Engine.Decision d=decision();if(d.cardKey==null)throw new IllegalStateException("test_session_complete");d.due=now();put("schedule_"+mode(),JSON.toJson(d));}
 
