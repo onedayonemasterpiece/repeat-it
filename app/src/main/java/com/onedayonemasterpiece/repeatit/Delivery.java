@@ -39,11 +39,14 @@ public final class Delivery {
 
     public static void arm(Context c){
         Store s=Store.get(c);AlarmManager alarms=c.getSystemService(AlarmManager.class);PendingIntent intent=alarmIntent(c);alarms.cancel(intent);
-        Instant now=Instant.now(),at=recoveryAt(s,now);if(at==null){s.put("alarm_reason","none");s.put("pending_retry_at","");return;}
-        boolean exact=Build.VERSION.SDK_INT<31||alarms.canScheduleExactAlarms();
+        Instant now=Instant.now(),at=recoveryAt(s,now);if(at==null){s.put("alarm_reason","none");s.put("pending_retry_at","");s.put("recovery_warning","");return;}
+        boolean exact=Build.VERSION.SDK_INT<31||alarms.canScheduleExactAlarms();Store.Pending pending=s.pending();
         if(exact)alarms.setExact(AlarmManager.RTC,at.toEpochMilli(),intent);else alarms.set(AlarmManager.RTC,at.toEpochMilli(),intent);
-        Store.Pending pending=s.pending();String reason=pending!=null?"pending_recovery":(s.mode().equals("normal")?"normal_due_or_window":"test_due");
+        String reason=pending!=null?"pending_recovery":(s.mode().equals("normal")?"normal_due_or_window":"test_due");
         s.put("alarm_reason",reason);s.put("pending_retry_at",pending==null?"":at.toString());s.put("alarm_precision",exact?"exact_non_wakeup":"inexact_non_wakeup");
+        // On Android 15, restarting an FGS from background via SYSTEM_ALERT_WINDOW alone requires a currently visible overlay.
+        // An exact alarm is a separate supported exemption, so missing exact-alarm access degrades OEM/process-death recovery.
+        s.put("recovery_warning",pending!=null&&Build.VERSION.SDK_INT>=35&&!exact?"exact_alarm_required_for_durable_android15_restart":"");
     }
     public static void start(Context c){
         Store s=Store.get(c);
