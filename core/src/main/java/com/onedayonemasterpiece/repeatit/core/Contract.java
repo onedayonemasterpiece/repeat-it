@@ -73,6 +73,14 @@ public final class Contract {
         // The legacy v2 revision was explicitly presentation_only, not a reset of meaning.
         c.meaning=version==2?1:positive(m.get("meaning_revision"),1000000);
         c.title=text(m.get("title"),512);c.text=text(m.get("text"),24000);
+        if(m.containsKey("detail")&&m.get("detail")!=null)text(m.get("detail"),2048);
+        String presentation=m.containsKey("presentation")?text(m.get("presentation"),32):"thesis";
+        if(!Set.of("thesis","metric","image").contains(presentation))throw new IllegalArgumentException("invalid_presentation");
+        if(presentation.equals("metric")){
+            if(!m.containsKey("metric"))throw new IllegalArgumentException("metric_required");
+            text(m.get("metric"),64);
+        }else if(m.containsKey("metric")&&m.get("metric")!=null)throw new IllegalArgumentException("metric_without_metric_presentation");
+        if(presentation.equals("image")&&m.get("image")==null)throw new IllegalArgumentException("image_required");
         if(version==3&&!m.containsKey("status"))throw new IllegalArgumentException("status_required");
         c.active=!"archived".equals(m.get("status"));
         if(m.containsKey("status")&&!Set.of("active","archived").contains(m.get("status")))throw new IllegalArgumentException("invalid_status");
@@ -84,7 +92,7 @@ public final class Contract {
             Map<String,Object> ref=object(r);
             if(!ref.containsKey("path")&&!ref.containsKey("url"))throw new IllegalArgumentException("source_locator_required");
         }
-        c.source=new LinkedHashMap<>(m); // preserve provenance and editorial verification status, never promote it
+        c.source=new LinkedHashMap<>(m); // preserve provenance and presentation metadata, never promote it
         if(m.get("image")!=null) {
             try {
                 Map<String,Object> image=object(m.get("image"));
