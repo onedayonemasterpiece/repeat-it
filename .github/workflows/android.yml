@@ -77,6 +77,15 @@ jobs:
             grep -q 'OK (1 test)' exact-alarm-recovery.txt
             adb shell am instrument -w -e class com.onedayonemasterpiece.repeatit.StorageCycleTest com.onedayonemasterpiece.repeatit.test/androidx.test.runner.AndroidJUnitRunner | tee storage-cycle.txt
             grep -q 'OK (1 test)' storage-cycle.txt
+
+            adb shell am force-stop com.onedayonemasterpiece.repeatit || true
+            adb shell pm clear com.onedayonemasterpiece.repeatit
+            adb shell pm grant com.onedayonemasterpiece.repeatit android.permission.POST_NOTIFICATIONS || true
+            adb shell appops set com.onedayonemasterpiece.repeatit SYSTEM_ALERT_WINDOW allow
+            adb shell appops set com.onedayonemasterpiece.repeatit SCHEDULE_EXACT_ALARM allow || true
+            adb shell am instrument -w -e class com.onedayonemasterpiece.repeatit.LockedDueAttachTest com.onedayonemasterpiece.repeatit.test/androidx.test.runner.AndroidJUnitRunner | tee locked-due-attach.txt
+            grep -q 'OK (1 test)' locked-due-attach.txt
+
             adb shell am force-stop com.onedayonemasterpiece.repeatit || true
             adb shell pm clear com.onedayonemasterpiece.repeatit
             adb shell pm grant com.onedayonemasterpiece.repeatit android.permission.POST_NOTIFICATIONS || true
@@ -118,6 +127,7 @@ jobs:
           path: |
             exact-alarm-recovery.txt
             storage-cycle.txt
+            locked-due-attach.txt
             overlay-stress.txt
             overlay-stress-debug.txt
             overlay-window-hierarchy.xml
@@ -181,8 +191,8 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           if [ "$release_kind" = debug ]; then
-            NOTES='Hosted build, Android 15 exact-alarm recovery check, transaction test and 40-cycle native overlay stress passed. Unresolved pending cards have a bounded non-wakeup recovery watchdog so a due that lands while the phone is locked cannot remain stranded until the daily window boundary. Exact-alarm access is used for reliable Android 15 background service recovery; normal pacing remains 15-to-10 minutes and one pending still blocks all other cards. This APK uses a temporary build debug signature.'
+            NOTES='Hosted build, Android 15 exact-alarm recovery check, locked-due preattach regression, transaction test and 40-cycle native overlay stress passed. A due overlay is pre-attached while the phone sleeps without counting as shown; after unlock the same pending becomes the one visible card. A bounded non-wakeup recovery watchdog remains as process/OEM freeze insurance. Normal pacing remains 15-to-10 minutes and one pending blocks all other cards. This APK uses a temporary build debug signature.'
           else
-            NOTES='Hosted build, Android 15 exact-alarm recovery check, transaction test and 40-cycle native overlay stress passed. Unresolved pending cards have a bounded non-wakeup recovery watchdog so a due that lands while the phone is locked cannot remain stranded until the daily window boundary. Exact-alarm access is used for reliable Android 15 background service recovery; normal pacing remains 15-to-10 minutes and one pending still blocks all other cards. APK uses the configured permanent signing identity.'
+            NOTES='Hosted build, Android 15 exact-alarm recovery check, locked-due preattach regression, transaction test and 40-cycle native overlay stress passed. A due overlay is pre-attached while the phone sleeps without counting as shown; after unlock the same pending becomes the one visible card. A bounded non-wakeup recovery watchdog remains as process/OEM freeze insurance. Normal pacing remains 15-to-10 minutes and one pending blocks all other cards. APK uses the configured permanent signing identity.'
           fi
           gh release create "$release_tag" release/* --target "$GITHUB_SHA" --title "Повторение 0.1.$GITHUB_RUN_NUMBER ($release_kind)" --notes "$NOTES"
