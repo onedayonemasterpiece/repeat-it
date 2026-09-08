@@ -6,6 +6,7 @@ import android.net.Uri;
 import android.os.*;
 import java.io.*;
 import java.nio.charset.StandardCharsets;
+import java.time.*;
 
 /** Binder UID gate, not an exported secret-bearing broadcast. Only USB-authorized Android shell UID 2000. */
 public final class AdminProvider extends ContentProvider {
@@ -17,11 +18,13 @@ public final class AdminProvider extends ContentProvider {
         else if(method.equals("exit_test"))s.exitTestMode();
         else if(method.equals("due"))s.forceDue();
         else if(method.equals("sync"))SyncWorker.configure(c,true);
-        else if(method.equals("pause")){s.put("paused",String.valueOf("true".equals(arg)));s.put("last_ui_action","admin_pause_"+arg+"@"+java.time.Instant.now());}
+        else if(method.equals("pause")){s.put("paused",String.valueOf("true".equals(arg)));s.put("last_ui_action","admin_pause_"+arg+"@"+Instant.now());}
         else if(method.equals("widget_verified")){s.put("widget_verified",String.valueOf("true".equals(arg)));PreviewWidget.refresh(c);}
         else if(!method.equals("status"))throw new IllegalArgumentException("unknown_command");
         Delivery.arm(c);if(mutating&&!s.value("paused","false").equals("true"))Delivery.start(c);c.sendBroadcast(new Intent(Delivery.CHANGED).setPackage(c.getPackageName()));Store.Pending pending=s.pending();com.onedayonemasterpiece.repeatit.core.Engine.Decision d=s.decision();
-        reply.putString("mode",s.mode());reply.putBoolean("paused",s.value("paused","false").equals("true"));reply.putBoolean("overlay_visible",s.value("overlay_visible","false").equals("true"));reply.putString("last_ui_action",s.value("last_ui_action",""));reply.putString("pending_id",pending==null?"":pending.id);reply.putInt("cards",s.cards().size());reply.putInt("events",s.eventCount(false));reply.putInt("verified_events",s.eventCount(true));reply.putString("next_due",String.valueOf(d.due));reply.putInt("remaining",d.remaining);reply.putInt("overdue",d.expired);reply.putString("feasibility",d.feasibility);reply.putString("overlay_geometry",s.value("overlay_geometry",""));
+        Instant now=Instant.now();long pendingWait=pending==null?0:Math.max(0,now.toEpochMilli()-pending.created);long scheduledLate=d.due==null?0:Math.max(0,Duration.between(d.due,now).toMillis());
+        reply.putString("mode",s.mode());reply.putBoolean("paused",s.value("paused","false").equals("true"));reply.putBoolean("overlay_visible",s.value("overlay_visible","false").equals("true"));reply.putString("last_ui_action",s.value("last_ui_action",""));reply.putString("pending_id",pending==null?"":pending.id);reply.putLong("pending_created_at",pending==null?0:pending.created);reply.putLong("pending_shown_at",pending==null?0:pending.shown);reply.putLong("pending_wait_ms",pendingWait);reply.putLong("scheduled_due_late_ms",scheduledLate);reply.putInt("cards",s.cards().size());reply.putInt("events",s.eventCount(false));reply.putInt("verified_events",s.eventCount(true));reply.putString("next_due",String.valueOf(d.due));reply.putInt("remaining",d.remaining);reply.putInt("overdue",d.expired);reply.putInt("deadline_overdue",d.expired);reply.putString("feasibility",d.feasibility);reply.putString("overlay_geometry",s.value("overlay_geometry",""));
+        reply.putString("alarm_reason",s.value("alarm_reason",""));reply.putString("pending_retry_at",s.value("pending_retry_at",""));reply.putString("alarm_precision",s.value("alarm_precision",""));
         reply.putString("library_sync_state",s.value("library_sync_state",""));reply.putString("library_sync_error",s.value("library_sync_error",""));reply.putString("last_library_sync",s.value("last_library_sync",""));
         reply.putString("progress_sync_state",s.value("progress_sync_state",""));reply.putString("progress_sync_error",s.value("progress_sync_error",""));reply.putString("last_progress_sync",s.value("last_progress_sync",""));
         reply.putString("sync_error",s.value("sync_error",""));reply.putString("sync_requested_at",s.value("sync_requested_at",""));reply.putString("last_sync",s.value("last_sync",""));reply.putString("last_sync_source_sha",s.value("last_sync_source_sha",""));reply.putString("delivery_error",s.value("delivery_error",""));reply.putString("device_id",s.device());return reply;
