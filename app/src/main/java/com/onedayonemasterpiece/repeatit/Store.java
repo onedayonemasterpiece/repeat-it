@@ -14,7 +14,7 @@ public final class Store extends SQLiteOpenHelper {
     public static final Gson JSON=new GsonBuilder().registerTypeAdapter(Instant.class,(JsonSerializer<Instant>)(v,t,c)->new JsonPrimitive(v.toString()))
         .registerTypeAdapter(Instant.class,(JsonDeserializer<Instant>)(v,t,c)->Instant.parse(v.getAsString())).create();
     private static final long NORMAL_GAP_DEFAULT_MS=Duration.ofMinutes(15).toMillis();
-    private static final long NORMAL_GAP_MIN_MS=Duration.ofMinutes(5).toMillis();
+    private static final long NORMAL_GAP_MIN_MS=Duration.ofMinutes(10).toMillis();
     private static final long MAX_JITTER_MS=Duration.ofMinutes(10).toMillis();
     private static Store instance;
     static Clock clock=Clock.systemDefaultZone();
