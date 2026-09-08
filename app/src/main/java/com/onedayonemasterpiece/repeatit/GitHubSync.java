@@ -46,10 +46,22 @@ public final class GitHubSync {
     private boolean matches(String actual,String expected){return actual!=null&&hash(actual.getBytes(StandardCharsets.UTF_8)).equals(hash(expected.getBytes(StandardCharsets.UTF_8)));}
     private void immutable(String path,String body) throws IOException {String remote=readRemote(path);if(remote!=null){if(!matches(remote,body))throw new IOException("immutable_batch_conflict");return;}try{put(path,body,null);}catch(IOException unknown){if(matches(readRemote(path),body))return;throw unknown;}if(!matches(readRemote(path),body))throw new IOException("batch_readback_failed");}
     private void summary(String path,String body) throws IOException {String old=readRemote(path);if(matches(old,body))return;String sha=null;if(old!=null){Response meta=request(path,"GET",false,null,null,4*1024*1024);sha=JsonParser.parseString(meta.body).getAsJsonObject().get("sha").getAsString();}try{put(path,body,sha);}catch(IOException e){if(matches(readRemote(path),body))return;throw e;}if(!matches(readRemote(path),body))throw new IOException("summary_readback_failed");}
+    private String issueText(){return issues.isEmpty()?"":String.join("\n",issues.subList(0,Math.min(30,issues.size())));}
     public void run() throws IOException {
-        String stable=null;for(int attempt=0;attempt<3;attempt++){String before=mainHead();issues.clear();loadKnowledge(before);String after=mainHead();if(before.equals(after)){stable=before;break;}}
-        if(stable==null)throw new IOException("idea_hub_main_changed_repeatedly");sourceRef=stable;
-        for(Store.Batch b:store.batches()){String path="learning/progress/"+store.device()+"/"+(b.mode.equals("normal")?"":"test-"+b.mode+"/")+b.id+".jsonl";immutable(path,b.body);store.verified(b.id);}
-        summary("learning/progress/"+store.device()+"/summary.json",store.summary());store.put("last_sync_source_sha",stable);store.put("last_sync",java.time.Instant.now().toString());store.put("sync_error",issues.isEmpty()?"":String.join("\n",issues.subList(0,Math.min(30,issues.size()))));
+        store.put("library_sync_state","running");store.put("library_sync_error","");
+        String stable=null;
+        try{
+            for(int attempt=0;attempt<3;attempt++){String before=mainHead();issues.clear();loadKnowledge(before);String after=mainHead();if(before.equals(after)){stable=before;break;}}
+            if(stable==null)throw new IOException("idea_hub_main_changed_repeatedly");
+        }catch(IOException e){store.put("library_sync_state","error");store.put("library_sync_error",e.getMessage()==null?e.getClass().getSimpleName():e.getMessage());throw e;}
+        sourceRef=stable;String libraryIssues=issueText();String libraryAt=java.time.Instant.now().toString();
+        store.put("last_sync_source_sha",stable);store.put("last_library_sync",libraryAt);store.put("library_sync_error",libraryIssues);store.put("library_sync_state",libraryIssues.isEmpty()?"ok":"warning");
+
+        store.put("progress_sync_state","running");store.put("progress_sync_error","");
+        try{
+            for(Store.Batch b:store.batches()){String path="learning/progress/"+store.device()+"/"+(b.mode.equals("normal")?"":"test-"+b.mode+"/")+b.id+".jsonl";immutable(path,b.body);store.verified(b.id);}
+            summary("learning/progress/"+store.device()+"/summary.json",store.summary());
+        }catch(IOException e){store.put("progress_sync_state","error");store.put("progress_sync_error",e.getMessage()==null?e.getClass().getSimpleName():e.getMessage());store.put("sync_error",store.value("progress_sync_error",""));throw e;}
+        String now=java.time.Instant.now().toString();store.put("last_progress_sync",now);store.put("progress_sync_state","ok");store.put("progress_sync_error","");store.put("last_sync",now);store.put("sync_error",libraryIssues);
     }
 }

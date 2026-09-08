@@ -35,12 +35,13 @@ public final class MainActivity extends Activity {
     private final Typeface editorial=Typeface.create("serif",Typeface.ITALIC);
 
     private Store store;
-    private TextView stateWord,heroMeta,heroSync,pauseButton,syncButton,setupHint;
+    private TextView stateWord,heroMeta,heroSync,pauseButton,syncButton,setupHint,testModeLabel,testExitButton;
+    private LinearLayout testSurface;
     private final BroadcastReceiver changed=new BroadcastReceiver(){@Override public void onReceive(Context c,Intent i){renderStatus();}};
 
     @Override public void onCreate(Bundle b){
         super.onCreate(b);
-        getWindow().addFlags(WindowManager.LayoutParams.FLAG_SECURE);
+        // The app and learning cards are intentionally screenshotable. Only the PAT entry dialog stays FLAG_SECURE.
         getWindow().setStatusBarColor(SAGE);getWindow().setNavigationBarColor(SAGE);
         if(Build.VERSION.SDK_INT>=23)getWindow().getDecorView().setSystemUiVisibility(View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR);
         if(Build.VERSION.SDK_INT>=26)getWindow().getDecorView().setSystemUiVisibility(View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR|View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR);
@@ -59,6 +60,13 @@ public final class MainActivity extends Activity {
         heroMeta=label("",19,PAPER,body);heroMeta.setLineSpacing(dp(2),1.08f);hero.addView(heroMeta);
         TextView philosophy=label("не торопим · не складываем карточки стопкой",17,0xffcbd0cb,editorial);philosophy.setPadding(0,dp(16),0,0);hero.addView(philosophy);
         page.addView(hero,blockMargins(0,0,0,dp(12)));
+
+        testSurface=surface(0xffffeee8,20);testSurface.setPadding(dp(16),dp(13),dp(16),dp(13));
+        LinearLayout testRow=new LinearLayout(this);testRow.setOrientation(LinearLayout.HORIZONTAL);testRow.setGravity(Gravity.CENTER_VERTICAL);
+        LinearLayout testCopy=new LinearLayout(this);testCopy.setOrientation(LinearLayout.VERTICAL);testCopy.addView(micro("ТЕСТОВЫЙ РЕЖИМ",ORANGE));
+        testModeLabel=label("",15,INK,body);testModeLabel.setPadding(0,dp(4),0,0);testCopy.addView(testModeLabel);testRow.addView(testCopy,new LinearLayout.LayoutParams(0,-2,1));
+        testExitButton=label("Завершить → normal",15,ORANGE,display);testExitButton.setGravity(Gravity.CENTER);testExitButton.setPadding(dp(10),dp(10),dp(4),dp(10));testExitButton.setClickable(true);testExitButton.setFocusable(true);testExitButton.setOnClickListener(v->exitTestMode());testRow.addView(testExitButton);testSurface.addView(testRow);testSurface.setVisibility(View.GONE);
+        page.addView(testSurface,blockMargins(0,0,0,dp(12)));
 
         LinearLayout syncSurface=surface(PAPER,26);syncSurface.setPadding(dp(18),dp(16),dp(18),dp(17));
         LinearLayout syncHeader=new LinearLayout(this);syncHeader.setOrientation(LinearLayout.HORIZONTAL);syncHeader.setGravity(Gravity.CENTER_VERTICAL);
@@ -103,12 +111,15 @@ public final class MainActivity extends Activity {
         boolean paused=!store.value("paused","false").equals("true");store.put("paused",String.valueOf(paused));store.put("last_ui_action",(paused?"pause":"resume")+"_tap@"+Instant.now());
         Delivery.start(this);Delivery.arm(this);sendBroadcast(new Intent(Delivery.CHANGED).setPackage(getPackageName()));Toast.makeText(this,paused?"Показы поставлены на паузу":"Показы продолжены",Toast.LENGTH_SHORT).show();renderStatus();
     }
+    private void exitTestMode(){
+        String previous=store.mode();if(previous.equals("normal"))return;store.exitTestMode();store.put("last_ui_action","exit_test_"+previous+"@"+Instant.now());Delivery.start(this);Delivery.arm(this);sendBroadcast(new Intent(Delivery.CHANGED).setPackage(getPackageName()));Toast.makeText(this,"Тест завершён · normal активен",Toast.LENGTH_SHORT).show();renderStatus();
+    }
 
     private void showPatDialog(){
         EditText entry=new EditText(this);entry.setInputType(InputType.TYPE_CLASS_TEXT|InputType.TYPE_TEXT_VARIATION_PASSWORD);entry.setSingleLine();entry.setImportantForAutofill(View.IMPORTANT_FOR_AUTOFILL_NO);entry.setTextSize(18);entry.setPadding(dp(14),dp(12),dp(14),dp(12));
         AlertDialog dialog=new AlertDialog.Builder(this).setTitle("GitHub PAT · idea-hub")
             .setMessage("Fine-grained token: Contents read/write. Repeat It читает learning/ и пишет только собственный progress.")
-            .setView(entry).setPositiveButton("Сохранить",(d,w)->{try{new TokenVault(this).save(entry.getText().toString());entry.getText().clear();store.put("last_ui_action","pat_saved@"+Instant.now());SyncWorker.configure(this,true);Toast.makeText(this,"Ключ сохранён · синхронизация запущена",Toast.LENGTH_SHORT).show();}catch(Exception e){entry.getText().clear();store.put("sync_error","token_save_failed:"+e.getClass().getSimpleName());Toast.makeText(this,"Не удалось сохранить ключ",Toast.LENGTH_LONG).show();}renderStatus();})
+            .setView(entry).setPositiveButton("Сохранить",(d,w)->{try{new TokenVault(this).save(entry.getText().toString());entry.getText().clear();store.put("last_ui_action","pat_saved@"+Instant.now());SyncWorker.configure(this,true);Toast.makeText(this,"Ключ сохранён · синхронизация запущена",Toast.LENGTH_SHORT).show();}catch(Exception e){entry.getText().clear();store.put("sync_error","token_save_failed:"+e.getClass().getSimpleName());store.put("library_sync_state","error");store.put("library_sync_error","token_save_failed:"+e.getClass().getSimpleName());Toast.makeText(this,"Не удалось сохранить ключ",Toast.LENGTH_LONG).show();}renderStatus();})
             .setNegativeButton("Отмена",(d,w)->entry.getText().clear()).create();dialog.show();dialog.getWindow().addFlags(WindowManager.LayoutParams.FLAG_SECURE);
     }
 
@@ -122,8 +133,12 @@ public final class MainActivity extends Activity {
     }
 
     private String nextLabel(Engine.Decision d){return d.due==null?"пока не назначен":d.due.atZone(java.time.ZoneId.systemDefault()).toLocalDateTime().toString().replace('T',' ');}
-    private String syncLabel(){String err=store.value("sync_error","");String last=store.value("last_sync","");if(!err.isEmpty())return "ОШИБКА";if(last.isEmpty())return "ЕЩЁ НЕ БЫЛО";return "АКТУАЛЬНО";}
-    private String setupStatus(){String overlay=Settings.canDrawOverlays(this)?"overlay разрешён":"нужен overlay";String sync=store.value("last_sync","").isEmpty()?"GitHub ещё не синхронизирован":"GitHub синхронизирован";return sync+" · "+overlay+".";}
+    private String syncLabel(){
+        String state=store.value("library_sync_state","");
+        if(state.equals("running"))return "ОБНОВЛЯЕМ";if(state.equals("warning"))return "ПРЕДУПРЕЖДЕНИЕ";if(state.equals("error"))return "ОШИБКА";if(state.equals("ok"))return "АКТУАЛЬНО";
+        String err=store.value("sync_error","");String last=store.value("last_sync","");if(!err.isEmpty()&&last.isEmpty())return "ОШИБКА";if(!err.isEmpty())return "ПРЕДУПРЕЖДЕНИЕ";if(last.isEmpty())return "ЕЩЁ НЕ БЫЛО";return "АКТУАЛЬНО";
+    }
+    private String setupStatus(){String overlay=Settings.canDrawOverlays(this)?"overlay разрешён":"нужен overlay";String sync=store.value("last_library_sync",store.value("last_sync","")).isEmpty()?"GitHub ещё не синхронизирован":"GitHub синхронизирован";return sync+" · "+overlay+".";}
 
     private String diagnosticText(){
         Engine.Decision d=store.decision();Store.Pending p=store.pending();StringBuilder s=new StringBuilder();
@@ -131,21 +146,30 @@ public final class MainActivity extends Activity {
         s.append("Карточек: ").append(store.cards().size()).append("\nPending: ").append(p==null?"нет":p.id).append("\nOverlay visible: ").append(store.value("overlay_visible","false")).append("\n");
         s.append("Следующий срок: ").append(d.due==null?"не назначен":d.due.atZone(java.time.ZoneId.systemDefault())).append("\nОсталось успешных «Помню»: ").append(d.remaining).append("\nПросрочено: ").append(d.expired).append("\nБез плана: ").append(d.withoutPlan).append("\n");
         s.append("Ответов локально / readback: ").append(store.eventCount(false)).append(" / ").append(store.eventCount(true)).append("\nПоследнее действие: ").append(store.value("last_ui_action","ещё нет")).append("\n");
-        s.append("Sync requested: ").append(store.value("sync_requested_at","ещё нет")).append("\nLast sync: ").append(store.value("last_sync","ещё нет")).append("\nidea-hub SHA: ").append(store.value("last_sync_source_sha","ещё нет")).append("\n");
-        String sync=store.value("sync_error","");String delivery=store.value("delivery_error","");if(!sync.isEmpty())s.append("Sync error: ").append(sync).append("\n");if(!delivery.isEmpty())s.append("Delivery error: ").append(delivery).append("\n");
-        s.append("Новые normal-показы: 07:40–00:30 · ").append(java.time.ZoneId.systemDefault()).append(". Уже показанная карточка ждёт ответа и ночью.");return s.toString();
+        s.append("Library state: ").append(store.value("library_sync_state","legacy")).append("\nLast library sync: ").append(store.value("last_library_sync","ещё нет")).append("\nidea-hub SHA: ").append(store.value("last_sync_source_sha","ещё нет")).append("\n");
+        String libraryError=store.value("library_sync_error","");if(!libraryError.isEmpty())s.append("Library detail: ").append(libraryError).append("\n");
+        s.append("Progress state: ").append(store.value("progress_sync_state","legacy")).append("\nLast progress sync: ").append(store.value("last_progress_sync","ещё нет")).append("\n");String progressError=store.value("progress_sync_error","");if(!progressError.isEmpty())s.append("Progress detail: ").append(progressError).append("\n");
+        String delivery=store.value("delivery_error","");if(!delivery.isEmpty())s.append("Delivery error: ").append(delivery).append("\n");
+        s.append("Normal: новые показы 07:40–00:30 · ").append(java.time.ZoneId.systemDefault()).append(". Между завершёнными normal-контактами обычно ≥15 мин; при дедлайновой нагрузке адаптивно, но никогда <10 мин. Уже показанная карточка ждёт ответа и ночью.");return s.toString();
     }
 
     private void showDiagnostics(){TextView copy=label(diagnosticText(),14,INK,body);copy.setPadding(dp(20),dp(6),dp(20),dp(8));copy.setTextIsSelectable(true);new AlertDialog.Builder(this).setTitle("Техническое состояние").setView(copy).setPositiveButton("Закрыть",null).show();}
 
     private void renderStatus(){
-        if(stateWord==null)return;boolean paused=store.value("paused","false").equals("true");Engine.Decision d=store.decision();Store.Pending p=store.pending();
-        stateWord.setText(paused?"ПАУЗА":"АКТИВНО");stateWord.setTextColor(paused?0xffffb29f:PAPER);
-        if(p!=null)heroMeta.setText("Одна карточка уже ждёт ответа.\nСледующая не появится, пока ты её не закроешь.");
-        else if(store.cards().isEmpty())heroMeta.setText("Карточек пока нет.\nОбнови библиотеку или настрой GitHub PAT.");
-        else heroMeta.setText("Карточек: "+store.cards().size()+"\nСледующий показ: "+nextLabel(d));
+        if(stateWord==null)return;boolean paused=store.value("paused","false").equals("true");String mode=store.mode();boolean test=!mode.equals("normal");Engine.Decision d=store.decision();Store.Pending p=store.pending();
+        stateWord.setText(paused?"ПАУЗА":(test?"ТЕСТ":"АКТИВНО"));stateWord.setTextColor(paused?0xffffb29f:PAPER);
+        if(test){
+            testSurface.setVisibility(View.VISIBLE);testModeLabel.setText(mode.equals("user_demo")?"USER DEMO · автономно примерно раз в 5 минут":"AGENT DEBUG · следующий показ только по команде агента");
+            if(p!=null)heroMeta.setText("Тестовая карточка ждёт ответа.\nМожно завершить тест — этот test pending будет отброшен без учебного прогресса.");
+            else heroMeta.setText("Идёт тестовый режим.\nNormal-прогресс не изменяется.");
+        }else{
+            testSurface.setVisibility(View.GONE);
+            if(p!=null)heroMeta.setText("Одна карточка уже ждёт ответа.\nСледующая не появится, пока ты её не закроешь.");
+            else if(store.cards().isEmpty())heroMeta.setText("Карточек пока нет.\nОбнови библиотеку или настрой GitHub PAT.");
+            else heroMeta.setText("Карточек: "+store.cards().size()+"\nСледующий показ: "+nextLabel(d));
+        }
         heroSync.setText(syncLabel());
-        pauseButton.setText(paused?"Продолжить показы  →":"Поставить на паузу");
+        if(test)pauseButton.setText(paused?"Продолжить тест  →":"Приостановить тест");else pauseButton.setText(paused?"Продолжить показы  →":"Поставить на паузу");
         pauseButton.setBackground(buttonBackground(paused?GRAPHITE:SAGE,paused?GRAPHITE:INK,1,22));pauseButton.setTextColor(paused?PAPER:INK);
         setupHint.setText(setupStatus());
     }

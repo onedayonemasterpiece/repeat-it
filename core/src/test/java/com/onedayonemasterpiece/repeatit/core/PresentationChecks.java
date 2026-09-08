@@ -13,9 +13,15 @@ public final class PresentationChecks {
     public static void main(String[] args){
         Map<String,Object> thesis=base();thesis.put("detail","One or two useful explanatory sentences.");Contract.Import a=load(thesis);check(a.cards.size()==1,"thesis detail accepted");check("One or two useful explanatory sentences.".equals(a.cards.get(0).source.get("detail")),"detail preserved for renderer");
 
-        Map<String,Object> metric=base();metric.put("presentation","metric");metric.put("metric","146 млн");Contract.Import b=load(metric);check(b.cards.size()==1,"metric accepted");check("146 млн".equals(b.cards.get(0).source.get("metric")),"metric value preserved");
+        Map<String,Object> metric=base();metric.put("presentation","metric");metric.put("metric",Map.of("value","146","unit","млн"));Contract.Import b=load(metric);check(b.cards.size()==1,"structured metric accepted");Map<?,?> parsedMetric=(Map<?,?>)b.cards.get(0).source.get("metric");check("146".equals(parsedMetric.get("value"))&&"млн".equals(parsedMetric.get("unit")),"metric value and unit preserved separately");
 
-        Map<String,Object> missingMetric=base();missingMetric.put("presentation","metric");Contract.Import c=load(missingMetric);check(c.cards.isEmpty()&&!c.issues.isEmpty(),"metric value required");
+        Map<String,Object> metricNoUnit=base();metricNoUnit.put("presentation","metric");metricNoUnit.put("metric",Map.of("value","84%"));check(load(metricNoUnit).cards.size()==1,"metric unit is optional");
+
+        Map<String,Object> legacyMetric=base();legacyMetric.put("presentation","metric");legacyMetric.put("metric","2.4K");check(load(legacyMetric).cards.size()==1,"legacy string metric remains readable during migration");
+
+        Map<String,Object> badMetric=base();badMetric.put("presentation","metric");badMetric.put("metric",Map.of("unit","%"));Contract.Import bad=load(badMetric);check(bad.cards.isEmpty()&&!bad.issues.isEmpty(),"structured metric value required");
+
+        Map<String,Object> missingMetric=base();missingMetric.put("presentation","metric");Contract.Import c=load(missingMetric);check(c.cards.isEmpty()&&!c.issues.isEmpty(),"metric required");
 
         Map<String,Object> missingImage=base();missingImage.put("presentation","image");Contract.Import d=load(missingImage);check(d.cards.isEmpty()&&!d.issues.isEmpty(),"image-first requires image object");
 
