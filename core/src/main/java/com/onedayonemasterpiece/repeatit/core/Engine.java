@@ -121,13 +121,14 @@ public final class Engine {
         for(Instant deadline:deadlines){
             int successes=0;double attempts=0;for(Lane lane:lanes)if(lane.p.deadline!=null&&!lane.p.deadline.isAfter(deadline)){successes+=lane.remaining;attempts+=lane.estimatedAttempts;}
             Load load=new Load();load.deadline=deadline;load.cumulative=successes;load.estimatedAttempts=attempts;load.availableMillis=w.available(now,deadline);load.requiredPerAllowedHour=load.availableMillis==0?null:attempts*3600000.0/load.availableMillis;result.loads.add(load);
+            if(attempts>0&&load.availableMillis==0&&!result.feasibility.startsWith("risk_"))result.feasibility="risk_no_allowed_window_before_deadline";
             if(attempts>0&&load.availableMillis>0)interval=Math.min(interval,load.availableMillis/(attempts+1.0));
         }
         if(!Double.isInfinite(interval))result.spacingMillis=Math.max(1,(long)Math.floor(interval));
         else result.spacingMillis=0;
 
         if(responseLatencies.size()>=5){
-            List<Long> sorted=new ArrayList<>(responseLatencies);Collections.sort(sorted);long median=sorted.get(sorted.size()/2);result.feasibility="observed_latency_and_response_rate_no_guarantee";
+            List<Long> sorted=new ArrayList<>(responseLatencies);Collections.sort(sorted);long median=sorted.get(sorted.size()/2);if(!result.feasibility.startsWith("risk_"))result.feasibility="observed_latency_and_response_rate_no_guarantee";
             for(Load load:result.loads)if((double)median*load.estimatedAttempts>load.availableMillis)result.feasibility="risk_from_observed_response_latency";
         }
         if(result.expired>0)result.feasibility=result.feasibility.startsWith("risk_")?"deadline_missed_and_observed_risk":"deadline_missed_continue_learning";
@@ -172,7 +173,7 @@ public final class Engine {
         if(!reaction.equals("remember")&&!reaction.equals("repeat"))throw new IllegalArgumentException("reaction");if(answered.isBefore(shown))throw new IllegalArgumentException("clock moved backwards");State s=old.copy();if(old.eligible!=null&&shown.isBefore(old.eligible))return s;
         s.attempts++;
         if(reaction.equals("remember")){s.contacts++;s.weakDebt=Math.max(0,s.weakDebt-1);}else s.weakDebt=Math.min(1000,s.weakDebt+1);s.last=answered;s.lastReaction=reaction;s.latencyMillis=Duration.between(shown,answered).toMillis();
-        if(s.contacts>=p.minimum){s.eligible=null;return s;}if(p.deadline==null||!p.deadline.isAfter(answered)){s.eligible=undatedEligible(answered,s.contacts,reaction,s.weakDebt,w);return s;}
+        if(s.contacts>=p.minimum){s.eligible=null;return s;}if(p.deadline==null||!p.deadline.isAfter(answered)){s.eligible=undatedEligible(answered,s.contacts,s.lastReaction,s.weakDebt,w);return s;}
         int left=Math.max(0,p.minimum-s.contacts);long horizon=w.available(answered,p.deadline);double fraction=reaction.equals("repeat")?0.25:0.55;long gap=Math.max(1,(long)(horizon/(double)(Math.max(1,left)+1)*fraction));s.eligible=w.add(answered,gap);return s;
     }
     private static Instant undatedEligible(Instant from,int successes,String reaction,int weakDebt,Window w){Duration gap;if(reaction.equals("repeat")){long minutes=Math.max(15,60/Math.max(1,Math.min(4,weakDebt)));gap=Duration.ofMinutes(minutes);}else gap=switch(successes){case 0->Duration.ZERO;case 1->Duration.ofHours(4);case 2->Duration.ofDays(1);case 3->Duration.ofDays(3);default->Duration.ofDays(7);};return w.next(from.plus(gap));}
