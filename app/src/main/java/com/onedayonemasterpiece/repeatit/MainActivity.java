@@ -16,6 +16,8 @@ import android.widget.*;
 import androidx.core.content.ContextCompat;
 import com.onedayonemasterpiece.repeatit.core.Engine;
 import java.time.*;
+import java.time.format.DateTimeFormatter;
+import java.util.*;
 
 public final class MainActivity extends Activity {
     public static volatile boolean visible=false;
@@ -141,12 +143,33 @@ public final class MainActivity extends Activity {
     }
     private String setupStatus(){String overlay=Settings.canDrawOverlays(this)?"overlay разрешён":"нужен overlay";String sync=store.value("last_library_sync",store.value("last_sync","")).isEmpty()?"GitHub ещё не синхронизирован":"GitHub синхронизирован";String alarm=exactAlarmReady()?"recovery-сигнал разрешён":"нужен точный recovery-сигнал";return sync+" · "+overlay+" · "+alarm+".";}
 
+    private int[] learningCounts(){
+        Map<String,Engine.Plan> active=new HashMap<>();for(Engine.Plan p:store.plans())if(p.active)active.put(p.deck,p);
+        int total=0,mastered=0;
+        for(Engine.Card c:store.cards()){if(!c.active)continue;Engine.Plan p=active.get(c.deck);if(p==null)continue;total++;if(store.state(c,"normal").contacts>=p.minimum)mastered++;}
+        return new int[]{total,mastered};
+    }
+    private String nearestDeadlineLabel(){
+        Instant nearest=null;for(Engine.Plan p:store.plans())if(p.active&&p.deadline!=null&&(nearest==null||p.deadline.isBefore(nearest)))nearest=p.deadline;
+        if(nearest==null)return "";
+        LocalDate deadline=nearest.atZone(ZoneId.systemDefault()).toLocalDate(),today=LocalDate.now();
+        long days=java.time.temporal.ChronoUnit.DAYS.between(today,deadline);
+        if(days==0)return "Ближайший срок: сегодня";if(days==1)return "Ближайший срок: завтра";
+        DateTimeFormatter format=DateTimeFormatter.ofPattern("d MMM",Locale.forLanguageTag("ru"));return "Ближайший срок: "+deadline.format(format);
+    }
+    private String normalMeta(Engine.Decision d){
+        int[] count=learningCounts();StringBuilder text=new StringBuilder();
+        text.append("В обучении · ").append(count[0]).append(" карточек\nосвоено ").append(count[1]).append(" · в работе ").append(Math.max(0,count[0]-count[1]));
+        String deadline=nearestDeadlineLabel();if(!deadline.isEmpty())text.append("\n").append(deadline);else text.append("\nСледующий показ: ").append(nextLabel(d));
+        return text.toString();
+    }
+
     private String diagnosticText(){
         Engine.Decision d=store.decision();Store.Pending p=store.pending();StringBuilder s=new StringBuilder();Instant now=Instant.now();
         long pendingWait=p==null?0:Math.max(0,now.toEpochMilli()-p.created),scheduledLate=d.due==null?0:Math.max(0,Duration.between(d.due,now).toMillis());
         s.append("Режим: ").append(store.mode()).append("\nПауза: ").append(store.value("paused","false")).append("\n");
         s.append("Карточек: ").append(store.cards().size()).append("\nPending: ").append(p==null?"нет":p.id).append("\nPending shown: ").append(p==null?"—":(p.shown>0?"да":"НЕТ, ещё не доставлен")).append("\nPending wait ms: ").append(pendingWait).append("\nOverlay visible: ").append(store.value("overlay_visible","false")).append("\n");
-        s.append("Следующий scheduler due: ").append(d.due==null?"не назначен":d.due.atZone(java.time.ZoneId.systemDefault())).append("\nScheduler due late ms: ").append(scheduledLate).append("\nОсталось успешных «Помню»: ").append(d.remaining).append("\nПросрочено по учебному дедлайну: ").append(d.expired).append("\nБез плана: ").append(d.withoutPlan).append("\n");
+        s.append("Следующая колода: ").append(d.deck==null?"—":d.deck).append("\nСледующий scheduler due: ").append(d.due==null?"не назначен":d.due.atZone(java.time.ZoneId.systemDefault())).append("\nScheduler due late ms: ").append(scheduledLate).append("\nОсталось успешных «Помню»: ").append(d.remaining).append("\nПросрочено по учебному дедлайну: ").append(d.expired).append("\nБез плана: ").append(d.withoutPlan).append("\nFeasibility: ").append(d.feasibility).append("\n");
         s.append("Recovery alarm: ").append(store.value("alarm_reason","none")).append(" · ").append(store.value("pending_retry_at","—")).append(" · ").append(store.value("alarm_precision","—")).append("\nLast recovery: ").append(store.value("last_recovery_action","ещё не было")).append("\n");String warning=store.value("recovery_warning","");if(!warning.isEmpty())s.append("Recovery warning: ").append(warning).append("\n");
         s.append("Ответов локально / readback: ").append(store.eventCount(false)).append(" / ").append(store.eventCount(true)).append("\nПоследнее действие: ").append(store.value("last_ui_action","ещё нет")).append("\n");
         s.append("Library state: ").append(store.value("library_sync_state","legacy")).append("\nLast library sync: ").append(store.value("last_library_sync","ещё нет")).append("\nidea-hub SHA: ").append(store.value("last_sync_source_sha","ещё нет")).append("\n");
@@ -162,7 +185,10 @@ public final class MainActivity extends Activity {
         if(stateWord==null)return;boolean paused=store.value("paused","false").equals("true");String mode=store.mode();boolean test=!mode.equals("normal");Engine.Decision d=store.decision();Store.Pending p=store.pending();
         stateWord.setText(paused?"ПАУЗА":(test?"ТЕСТ":"АКТИВНО"));stateWord.setTextColor(paused?0xffffb29f:PAPER);
         if(test){
-            testSurface.setVisibility(View.VISIBLE);testModeLabel.setText(mode.equals("user_demo")?"USER DEMO · автономно примерно раз в 5 минут":"AGENT DEBUG · следующий показ только по команде агента");
+            testSurface.setVisibility(View.VISIBLE);
+            if(mode.equals("user_demo"))testModeLabel.setText("USER DEMO · автономно примерно раз в 5 минут");
+            else if(mode.equals("scheduler_debug"))testModeLabel.setText("SCHEDULER DEBUG · 10 synthetic cards · шаг только по ADB");
+            else testModeLabel.setText("AGENT DEBUG · следующий показ только по команде агента");
             if(p!=null)heroMeta.setText("Тестовая карточка ждёт ответа.\nМожно завершить тест — этот test pending будет отброшен без учебного прогресса.");
             else heroMeta.setText("Идёт тестовый режим.\nNormal-прогресс не изменяется.");
         }else{
@@ -170,7 +196,7 @@ public final class MainActivity extends Activity {
             if(p!=null&&p.shown==0)heroMeta.setText("Карточка назначена, но ещё не показана.\nПосле блокировки она восстановится при следующей возможности доставки.");
             else if(p!=null)heroMeta.setText("Одна карточка уже показана и ждёт ответа.\nСледующая не появится, пока ты её не закроешь.");
             else if(store.cards().isEmpty())heroMeta.setText("Карточек пока нет.\nОбнови библиотеку или настрой GitHub PAT.");
-            else heroMeta.setText("Карточек: "+store.cards().size()+"\nСледующий показ: "+nextLabel(d));
+            else heroMeta.setText(normalMeta(d));
         }
         heroSync.setText(syncLabel());
         if(test)pauseButton.setText(paused?"Продолжить тест  →":"Приостановить тест");else pauseButton.setText(paused?"Продолжить показы  →":"Поставить на паузу");
